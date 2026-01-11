@@ -103,6 +103,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		keyString := msg.String()
+		slog.Debug("[TUI/KeyPress]", "key", keyString)
 
 		if a.app.CurrentPermission.ID != "" {
 			if keyString == "enter" || keyString == "esc" || keyString == "a" {
@@ -325,8 +326,11 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// 9. Check again for commands that don't require leader (excluding interrupt when busy and exit when in debounce)
+		slog.Debug("[TUI/Commands] Matching", "key", keyString, "leader", a.app.IsLeaderSequence)
 		matches := a.app.Commands.Matches(msg, a.app.IsLeaderSequence)
+		slog.Debug("[TUI/Commands] Matched", "count", len(matches))
 		if len(matches) > 0 {
+			slog.Info("[TUI/Commands] Executing", "commands", len(matches), "first", matches[0].Name)
 			// Skip interrupt key if we're in debounce mode and app is busy
 			if interruptCommand.Matches(msg, a.app.IsLeaderSequence) && a.app.IsBusy() && a.interruptKeyState != InterruptKeyIdle {
 				return a, nil
