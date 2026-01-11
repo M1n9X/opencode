@@ -769,22 +769,32 @@ func (a *App) CreateSession(ctx context.Context) (*opencode.Session, error) {
 }
 
 func (a *App) SendPrompt(ctx context.Context, prompt Prompt) (*App, tea.Cmd) {
+	slog.Info("[SendPrompt] Called", "text", prompt.Text, "attachments", len(prompt.Attachments))
 	var cmds []tea.Cmd
 	if a.Session.ID == "" {
+		slog.Info("[SendPrompt] No session, creating new one")
 		session, err := a.CreateSession(ctx)
 		if err != nil {
+			slog.Error("[SendPrompt] Failed to create session", "error", err)
 			return a, toast.NewErrorToast(err.Error())
 		}
 		a.Session = session
+		slog.Info("[SendPrompt] Session created", "sessionID", session.ID)
 		cmds = append(cmds, util.CmdHandler(SessionCreatedMsg{Session: session}))
 	}
 
 	messageID := id.Ascending(id.Message)
 	message := prompt.ToMessage(messageID, a.Session.ID)
+	slog.Info("[SendPrompt] Message prepared", "messageID", messageID, "sessionID", a.Session.ID, "parts", len(message.Parts))
 
 	a.Messages = append(a.Messages, message)
 
 	cmds = append(cmds, func() tea.Msg {
+		slog.Info("[SendPrompt] Sending to API",
+			"sessionID", a.Session.ID,
+			"agent", a.Agent().Name,
+			"provider", a.Provider.ID,
+			"model", a.Model.ID)
 		_, err := a.Client.Session.Prompt(ctx, a.Session.ID, opencode.SessionPromptParams{
 			Model: opencode.F(opencode.SessionPromptParamsModel{
 				ProviderID: opencode.F(a.Provider.ID),
@@ -796,9 +806,10 @@ func (a *App) SendPrompt(ctx context.Context, prompt Prompt) (*App, tea.Cmd) {
 		})
 		if err != nil {
 			errormsg := fmt.Sprintf("failed to send message: %v", err)
-			slog.Error(errormsg)
+			slog.Error("[SendPrompt] API error", "error", err)
 			return toast.NewErrorToast(errormsg)()
 		}
+		slog.Info("[SendPrompt] Message sent successfully")
 		return nil
 	})
 
@@ -808,13 +819,17 @@ func (a *App) SendPrompt(ctx context.Context, prompt Prompt) (*App, tea.Cmd) {
 }
 
 func (a *App) SendCommand(ctx context.Context, command string, args string) (*App, tea.Cmd) {
+	slog.Info("[SendCommand] Called", "command", command, "args", args)
 	var cmds []tea.Cmd
 	if a.Session.ID == "" {
+		slog.Info("[SendCommand] No session, creating new one")
 		session, err := a.CreateSession(ctx)
 		if err != nil {
+			slog.Error("[SendCommand] Failed to create session", "error", err)
 			return a, toast.NewErrorToast(err.Error())
 		}
 		a.Session = session
+		slog.Info("[SendCommand] Session created", "sessionID", session.ID)
 		cmds = append(cmds, util.CmdHandler(SessionCreatedMsg{Session: session}))
 	}
 
@@ -826,6 +841,7 @@ func (a *App) SendCommand(ctx context.Context, command string, args string) (*Ap
 		}
 		if a.Provider != nil && a.Model != nil {
 			params.Model = opencode.F(a.Provider.ID + "/" + a.Model.ID)
+			slog.Info("[SendCommand] Sending to API", "model", a.Provider.ID+"/"+a.Model.ID)
 		}
 		_, err := a.Client.Session.Command(
 			context.Background(),
@@ -833,9 +849,10 @@ func (a *App) SendCommand(ctx context.Context, command string, args string) (*Ap
 			params,
 		)
 		if err != nil {
-			slog.Error("Failed to execute command", "error", err)
+			slog.Error("[SendCommand] API error", "error", err)
 			return toast.NewErrorToast(fmt.Sprintf("Failed to execute command: %v", err))()
 		}
+		slog.Info("[SendCommand] Command sent successfully")
 		return nil
 	})
 
