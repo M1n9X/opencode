@@ -1513,8 +1513,11 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 		a.editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 	case commands.InputSubmitCommand:
+		fmt.Fprintf(os.Stderr, "[DEBUG] InputSubmitCommand triggered!\n")
+		slog.Info("[InputSubmitCommand] Calling editor.Submit()")
 		updated, cmd := a.editor.Submit()
 		a.editor = updated.(chat.EditorComponent)
+		fmt.Fprintf(os.Stderr, "[DEBUG] editor.Submit() returned\n")
 		cmds = append(cmds, cmd)
 	case commands.InputNewlineCommand:
 		updated, cmd := a.editor.Newline()
