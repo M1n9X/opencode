@@ -553,20 +553,35 @@ func (a *App) InitializeProvider() tea.Cmd {
 		}
 	}
 
-	// Priority 6: Internal priority fallback (Anthropic preferred, then first available)
+	// Priority 6: Internal priority fallback (OpenCode preferred, then Anthropic, then first available)
 	if selectedProvider == nil {
-		// Try Anthropic first as internal priority
-		if provider := findProviderByID(providers, "anthropic"); provider != nil {
-			if model := getDefaultModel(providersResponse, *provider); model != nil {
-				selectedProvider = provider
-				selectedModel = model
-				slog.Debug(
-					"Selected model from internal priority (Anthropic)",
-					"provider",
-					provider.ID,
-					"model",
-					model.ID,
-				)
+		// New priority: opencode/glm-4.7-free
+		if provider, model := findModelByProviderAndModelID(providers, "opencode", "glm-4.7-free"); provider != nil && model != nil {
+			selectedProvider = provider
+			selectedModel = model
+			slog.Debug(
+				"Selected model from internal priority (OpenCode)",
+				"provider",
+				provider.ID,
+				"model",
+				model.ID,
+			)
+		}
+
+		// Try Anthropic second
+		if selectedProvider == nil {
+			if provider := findProviderByID(providers, "anthropic"); provider != nil {
+				if model := getDefaultModel(providersResponse, *provider); model != nil {
+					selectedProvider = provider
+					selectedModel = model
+					slog.Debug(
+						"Selected model from internal priority (Anthropic)",
+						"provider",
+						provider.ID,
+						"model",
+						model.ID,
+					)
+				}
 			}
 		}
 
