@@ -22,6 +22,7 @@ import { ImportCommand } from "./cli/cmd/import"
 import { AttachCommand } from "./cli/cmd/tui/attach"
 import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { TuiSpawnCommand } from "./cli/cmd/tui/spawn"
+import { TuiCommand } from "./cli/cmd/tui-bubble"
 import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
@@ -78,6 +79,7 @@ const cli = yargs(hideBin(process.argv))
   })
   .usage("\n" + UI.logo())
   .completion("completion", "generate shell completion script")
+  .command(TuiCommand)
   .command(AcpCommand)
   .command(McpCommand)
   .command(TuiThreadCommand)
