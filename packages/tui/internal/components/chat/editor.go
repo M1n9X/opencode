@@ -772,6 +772,11 @@ func NewEditorComponent(app *app.App) EditorComponent {
 	ta.VirtualCursor = false
 	ta = updateTextareaStyles(ta)
 
+	// CRITICAL FIX: Disable textarea's Enter key binding
+	// This allows Enter to propagate to TUI layer where InputSubmitCommand
+	// will trigger editor.Submit() to send messages
+	ta.KeyMap.InsertNewline.SetEnabled(false)
+
 	m := &editorComponent{
 		app:                    app,
 		textarea:               ta,
