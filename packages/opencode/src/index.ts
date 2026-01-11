@@ -19,9 +19,10 @@ import { McpCommand } from "./cli/cmd/mcp"
 import { GithubCommand } from "./cli/cmd/github"
 import { ExportCommand } from "./cli/cmd/export"
 import { ImportCommand } from "./cli/cmd/import"
-import { AttachCommand } from "./cli/cmd/tui/attach"
-import { TuiThreadCommand } from "./cli/cmd/tui/thread"
-import { TuiSpawnCommand } from "./cli/cmd/tui/spawn"
+// TEMPORARILY DISABLED - These require React/TypeScript TUI which is being replaced by Bubble TUI
+// import { AttachCommand } from "./cli/cmd/tui/attach"
+// import { TuiThreadCommand } from "./cli/cmd/tui/thread"
+// import { TuiSpawnCommand } from "./cli/cmd/tui/spawn"
 import { TuiCommand } from "./cli/cmd/tui-bubble"
 import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
@@ -82,9 +83,10 @@ const cli = yargs(hideBin(process.argv))
   .command(TuiCommand)
   .command(AcpCommand)
   .command(McpCommand)
-  .command(TuiThreadCommand)
-  .command(TuiSpawnCommand)
-  .command(AttachCommand)
+  // TEMPORARILY DISABLED - These require React/TypeScript TUI
+  // .command(TuiThreadCommand)
+  // .command(TuiSpawnCommand)
+  // .command(AttachCommand)
   .command(RunCommand)
   .command(GenerateCommand)
   .command(DebugCommand)
