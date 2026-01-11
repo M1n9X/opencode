@@ -21,7 +21,7 @@ func TestLoadThemesFromJSON(t *testing.T) {
 	}
 
 	// Check for expected themes
-	expectedThemes := []string{"tokyonight", "opencode", "everforest", "ayu"}
+	expectedThemes := []string{"tokyonight", "catppuccin", "everforest", "ayu"}
 	for _, expected := range expectedThemes {
 		found := slices.Contains(themes, expected)
 		if !found {

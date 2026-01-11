@@ -71,6 +71,7 @@ export const TuiCommand = cmd({
         default: "127.0.0.1",
       }),
   handler: async (args) => {
+    console.log("DEBUG: TuiCommand handler called with args:", args)
     while (true) {
       const cwd = args.project ? path.resolve(args.project) : process.cwd()
       try {

@@ -115,7 +115,7 @@ const cli = yargs(hideBin(process.argv))
     if (err) throw err
     process.exit(1)
   })
-  .strict()
+// .strict()
 
 try {
   await cli.parse()
