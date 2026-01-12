@@ -159,17 +159,10 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		text := string(msg)
 
 		if filePath := strings.TrimSpace(strings.TrimPrefix(text, "@")); strings.HasPrefix(text, "@") && filePath != "" {
-			statPath := filePath
-			if !filepath.IsAbs(filePath) {
-				statPath = filepath.Join(util.CwdPath, filePath)
-			}
-			if _, err := os.Stat(statPath); err == nil {
-				attachment := m.createAttachmentFromPath(filePath)
-				if attachment != nil {
-					m.textarea.InsertAttachment(attachment)
-					m.textarea.InsertString(" ")
-					return m, nil
-				}
+			if attachment := m.tryAttachmentFromPath(filePath); attachment != nil {
+				m.textarea.InsertAttachment(attachment)
+				m.textarea.InsertString(" ")
+				return m, nil
 			}
 		}
 
@@ -829,10 +822,7 @@ func getMediaTypeFromExtension(ext string) string {
 func (m *editorComponent) createAttachmentFromFile(filePath string) *attachment.Attachment {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	mediaType := getMediaTypeFromExtension(ext)
-	absolutePath := filePath
-	if !filepath.IsAbs(filePath) {
-		absolutePath = filepath.Join(util.CwdPath, filePath)
-	}
+	absolutePath := resolvePath(filePath)
 
 	// For text files, create a simple file reference
 	if mediaType == "text/plain" {
@@ -851,7 +841,7 @@ func (m *editorComponent) createAttachmentFromFile(filePath string) *attachment.
 	}
 
 	// For binary files (images, PDFs), read and encode
-	fileBytes, err := os.ReadFile(filePath)
+	fileBytes, err := os.ReadFile(absolutePath)
 	if err != nil {
 		slog.Error("Failed to read file", "error", err)
 		return nil
@@ -883,10 +873,7 @@ func (m *editorComponent) createAttachmentFromFile(filePath string) *attachment.
 func (m *editorComponent) createAttachmentFromPath(filePath string) *attachment.Attachment {
 	extension := filepath.Ext(filePath)
 	mediaType := getMediaTypeFromExtension(extension)
-	absolutePath := filePath
-	if !filepath.IsAbs(filePath) {
-		absolutePath = filepath.Join(util.CwdPath, filePath)
-	}
+	absolutePath := resolvePath(filePath)
 	return &attachment.Attachment{
 		ID:        uuid.NewString(),
 		Type:      "file",
@@ -899,4 +886,21 @@ func (m *editorComponent) createAttachmentFromPath(filePath string) *attachment.
 			Mime: mediaType,
 		},
 	}
+}
+
+// tryAttachmentFromPath tries cwd then repo root to locate the file before creating attachment.
+func (m *editorComponent) tryAttachmentFromPath(filePath string) *attachment.Attachment {
+	paths := []string{filePath}
+	if !filepath.IsAbs(filePath) {
+		paths = append([]string{
+			filepath.Join(util.CwdPath, filePath),
+			filepath.Join(util.RootPath, filePath),
+		}, paths...)
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return m.createAttachmentFromPath(filePath)
+		}
+	}
+	return nil
 }
