@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/sst/opencode/internal/app"
 	"github.com/sst/opencode/internal/components/list"
 	"github.com/sst/opencode/internal/components/modal"
+	"github.com/sst/opencode/internal/components/toast"
 	"github.com/sst/opencode/internal/layout"
 	"github.com/sst/opencode/internal/styles"
 	"github.com/sst/opencode/internal/theme"
@@ -194,6 +196,14 @@ func (n *timelineDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					util.CmdHandler(modal.CloseModalMsg{}),
 				)
 			}
+		case "f":
+			// Fork session to selected message
+			if item, idx := n.list.GetSelectedItem(); idx >= 0 {
+				return n, tea.Sequence(
+					n.forkSession(item.messageID),
+					util.CmdHandler(modal.CloseModalMsg{}),
+				)
+			}
 		case "enter":
 			// Keep Enter functionality for closing the modal
 			if _, idx := n.list.GetSelectedItem(); idx >= 0 {
@@ -219,15 +229,9 @@ func (n *timelineDialog) Render(background string) string {
 		Render
 	mutedStyle := styles.NewStyle().Foreground(t.TextMuted()).Background(t.BackgroundPanel()).Render
 
-	helpText := keyStyle(
-		"↑/↓",
-	) + mutedStyle(
-		" jump   ",
-	) + keyStyle(
-		"r",
-	) + mutedStyle(
-		" restore",
-	)
+	helpText := keyStyle("↑/↓") + mutedStyle(" jump   ") +
+		keyStyle("r") + mutedStyle(" restore   ") +
+		keyStyle("f") + mutedStyle(" fork")
 
 	bgColor := t.BackgroundPanel()
 	helpView := styles.NewStyle().
@@ -244,6 +248,19 @@ func (n *timelineDialog) Render(background string) string {
 
 func (n *timelineDialog) Close() tea.Cmd {
 	return nil
+}
+
+func (n *timelineDialog) forkSession(messageID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		revertedSession, err := n.app.Client.Session.Revert(ctx, n.app.Session.ID, opencode.SessionRevertParams{
+			MessageID: opencode.F(messageID),
+		})
+		if err != nil {
+			return toast.NewErrorToast("Failed to fork session: " + err.Error())()
+		}
+		return app.SessionSelectedMsg(revertedSession)
+	}
 }
 
 // extractMessagePreview extracts a preview from message parts

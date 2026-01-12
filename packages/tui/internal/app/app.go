@@ -385,6 +385,11 @@ func SetClipboard(text string) tea.Cmd {
 		clipboard.Write(clipboard.FmtText, []byte(text))
 		return nil
 	})
+	// send OSC52 sequence for terminals that support it (kitty/wezterm)
+	cmds = append(cmds, func() tea.Msg {
+		util.CopyOSC52(text)
+		return nil
+	})
 	// try to set the clipboard using OSC52 for terminals that support it
 	cmds = append(cmds, tea.SetClipboard(text))
 	return tea.Sequence(cmds...)

@@ -745,6 +745,9 @@ func renderToolDetails(
 		case "webfetch":
 			if format, ok := toolInputMap["format"].(string); ok && output != nil {
 				body = *output
+				if pretty, ok := prettyJSON(body); ok {
+					body = pretty
+				}
 				body = util.TruncateHeight(body, 10)
 				if format == "html" || format == "markdown" {
 					body = util.ToMarkdown(body, width, backgroundColor)
@@ -811,6 +814,9 @@ func renderToolDetails(
 				output = &empty
 			}
 			body = *output
+			if pretty, ok := prettyJSON(body); ok {
+				body = pretty
+			}
 			body = util.TruncateHeight(body, 10)
 			body = defaultStyle(body)
 		}
@@ -847,6 +853,22 @@ func renderToolDetails(
 
 	title := renderToolTitle(toolCall, width)
 	content := title + "\n\n" + body
+
+	// Collapse/expand long tool outputs (shared toggle map via expanded[key])
+	if res.zoneID == "" && key != "" {
+		lineHeight := lipgloss.Height(body)
+		maxLines := 18
+		if lineHeight > maxLines && !isExpanded {
+			truncated := util.TruncateHeight(body, maxLines)
+			body = truncated + "\n" + footerStyle("Click to expand")
+			content = title + "\n\n" + body
+			res.zoneID = key
+		} else if lineHeight > maxLines && isExpanded {
+			body = body + "\n" + footerStyle("Click to collapse")
+			content = title + "\n\n" + body
+			res.zoneID = key
+		}
+	}
 
 	if permissionContent != "" {
 		content += "\n\n\n" + permissionContent
@@ -990,6 +1012,25 @@ func renderToolTitle(
 		title = styles.NewStyle().Foreground(t.Error()).Render(title)
 	}
 	return title
+}
+
+func prettyJSON(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return "", false
+	}
+	var jsonData any
+	if err := json.Unmarshal([]byte(trimmed), &jsonData); err != nil {
+		return "", false
+	}
+	indented, err := json.MarshalIndent(jsonData, "", "  ")
+	if err != nil {
+		return "", false
+	}
+	return string(indented), true
 }
 
 func renderToolAction(name string) string {

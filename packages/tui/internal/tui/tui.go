@@ -99,44 +99,6 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		keyString := msg.String()
 		slog.Debug("[TUI/KeyPress]", "key", keyString)
 
-		if a.app.CurrentPermission.ID != "" {
-			if keyString == "enter" || keyString == "esc" || keyString == "a" {
-				sessionID := a.app.CurrentPermission.SessionID
-				permissionID := a.app.CurrentPermission.ID
-				a.chatPage.Editor.Focus()
-				a.app.Permissions = a.app.Permissions[1:]
-				if len(a.app.Permissions) > 0 {
-					a.app.CurrentPermission = a.app.Permissions[0]
-				} else {
-					a.app.CurrentPermission = opencode.Permission{}
-				}
-				response := opencode.SessionPermissionRespondParamsResponseOnce
-				switch keyString {
-				case "enter":
-					response = opencode.SessionPermissionRespondParamsResponseOnce
-				case "a":
-					response = opencode.SessionPermissionRespondParamsResponseAlways
-				case "esc":
-					response = opencode.SessionPermissionRespondParamsResponseReject
-				}
-
-				return a, func() tea.Msg {
-					resp, err := a.app.Client.Session.Permissions.Respond(
-						context.Background(),
-						sessionID,
-						permissionID,
-						opencode.SessionPermissionRespondParams{Response: opencode.F(response)},
-					)
-					if err != nil {
-						slog.Error("Failed to respond to permission request", "error", err)
-						return toast.NewErrorToast("Failed to respond to permission request")()
-					}
-					slog.Debug("Responded to permission request", "response", resp)
-					return nil
-				}
-			}
-		}
-
 		if a.app.IsBashMode {
 			if keyString == "backspace" && a.chatPage.Editor.Length() == 0 {
 				a.app.IsBashMode = false
@@ -585,8 +547,12 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case opencode.EventListResponseEventPermissionUpdated:
 		slog.Debug("permission updated", "session", msg.Properties.SessionID, "permission", msg.Properties.ID)
 		a.app.Permissions = append(a.app.Permissions, msg.Properties)
-		a.app.CurrentPermission = a.app.Permissions[0]
-		a.chatPage.Editor.Blur()
+		if a.app.CurrentPermission.ID == "" {
+			a.app.CurrentPermission = a.app.Permissions[0]
+			permDialog := dialog.NewPermissionDialog(a.app, a.app.CurrentPermission)
+			a.modal = permDialog
+			a.chatPage.Editor.Blur()
+		}
 	case opencode.EventListResponseEventPermissionReplied:
 		index := slices.IndexFunc(a.app.Permissions, func(p opencode.Permission) bool {
 			return p.ID == msg.Properties.PermissionID
@@ -597,8 +563,17 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.app.CurrentPermission.ID == msg.Properties.PermissionID {
 			if len(a.app.Permissions) > 0 {
 				a.app.CurrentPermission = a.app.Permissions[0]
+				permDialog := dialog.NewPermissionDialog(a.app, a.app.CurrentPermission)
+				a.modal = permDialog
+				a.chatPage.Editor.Blur()
 			} else {
 				a.app.CurrentPermission = opencode.Permission{}
+				// Close permission modal if it is open
+				switch a.modal.(type) {
+				case dialog.PermissionDialog:
+					a.modal = nil
+					a.chatPage.Editor.Focus()
+				}
 			}
 		}
 	case opencode.EventListResponseEventSessionError:
