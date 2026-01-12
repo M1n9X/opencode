@@ -13,15 +13,12 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/sst/opencode-sdk-go"
 	"github.com/sst/opencode/internal/api"
 	"github.com/sst/opencode/internal/app"
 	"github.com/sst/opencode/internal/commands"
-	"github.com/sst/opencode/internal/completions"
 	"github.com/sst/opencode/internal/components/chat"
-	cmdcomp "github.com/sst/opencode/internal/components/commands"
 	"github.com/sst/opencode/internal/components/dialog"
 	"github.com/sst/opencode/internal/components/modal"
 	"github.com/sst/opencode/internal/components/status"
@@ -29,6 +26,7 @@ import (
 	"github.com/sst/opencode/internal/layout"
 	"github.com/sst/opencode/internal/styles"
 	"github.com/sst/opencode/internal/theme"
+	chatpage "github.com/sst/opencode/internal/tui/pages/chat"
 	"github.com/sst/opencode/internal/util"
 )
 
@@ -60,23 +58,18 @@ const exitDebounceTimeout = 1 * time.Second
 type Model struct {
 	tea.Model
 	tea.CursorModel
-	width, height        int
-	app                  *app.App
-	modal                layout.Modal
-	status               status.StatusComponent
-	editor               chat.EditorComponent
-	messages             chat.MessagesComponent
-	completions          dialog.CompletionDialog
-	commandProvider      completions.CompletionProvider
-	fileProvider         completions.CompletionProvider
-	symbolsProvider      completions.CompletionProvider
-	agentsProvider       completions.CompletionProvider
-	showCompletionDialog bool
-	leaderBinding        *key.Binding
-	toastManager         *toast.ToastManager
-	interruptKeyState    InterruptKeyState
-	exitKeyState         ExitKeyState
-	messagesRight        bool
+	width, height int
+	app           *app.App
+	modal         layout.Modal
+	status        status.StatusComponent
+
+	chatPage *chatpage.Page
+
+	leaderBinding     *key.Binding
+	toastManager      *toast.ToastManager
+	interruptKeyState InterruptKeyState
+	exitKeyState      ExitKeyState
+	messagesRight     bool
 }
 
 func (a Model) Init() tea.Cmd {
@@ -87,10 +80,8 @@ func (a Model) Init() tea.Cmd {
 		cmds = append(cmds, tea.RequestBackgroundColor)
 	}
 	cmds = append(cmds, a.app.InitializeProvider())
-	cmds = append(cmds, a.editor.Init())
-	cmds = append(cmds, a.messages.Init())
+	cmds = append(cmds, a.chatPage.Init())
 	cmds = append(cmds, a.status.Init())
-	cmds = append(cmds, a.completions.Init())
 	cmds = append(cmds, a.toastManager.Init())
 
 	return tea.Batch(cmds...)
@@ -109,7 +100,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if keyString == "enter" || keyString == "esc" || keyString == "a" {
 				sessionID := a.app.CurrentPermission.SessionID
 				permissionID := a.app.CurrentPermission.ID
-				a.editor.Focus()
+				a.chatPage.Editor.Focus()
 				a.app.Permissions = a.app.Permissions[1:]
 				if len(a.app.Permissions) > 0 {
 					a.app.CurrentPermission = a.app.Permissions[0]
@@ -144,7 +135,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if a.app.IsBashMode {
-			if keyString == "backspace" && a.editor.Length() == 0 {
+			if keyString == "backspace" && a.chatPage.Editor.Length() == 0 {
 				a.app.IsBashMode = false
 				return a, nil
 			}
@@ -152,8 +143,8 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if keyString == "enter" || keyString == "esc" || keyString == "ctrl+c" {
 				a.app.IsBashMode = false
 				if keyString == "enter" {
-					updated, cmd := a.editor.SubmitBash()
-					a.editor = updated.(chat.EditorComponent)
+					updated, cmd := a.chatPage.Editor.SubmitBash()
+					a.chatPage.Editor = updated.(chat.EditorComponent)
 					cmds = append(cmds, cmd)
 				}
 				return a, tea.Batch(cmds...)
@@ -201,83 +192,12 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// 3. Handle completions trigger
-		if keyString == "/" &&
-			!a.showCompletionDialog &&
-			a.editor.Value() == "" &&
-			!a.app.IsBashMode {
-			a.showCompletionDialog = true
+		// 3. Handle ChatPage shortcuts (forwarding happens at the end)
 
-			updated, cmd := a.editor.Update(msg)
-			a.editor = updated.(chat.EditorComponent)
-			cmds = append(cmds, cmd)
-
-			// Set command provider for command completion
-			a.completions = dialog.NewCompletionDialogComponent("/", a.commandProvider)
-			updated, cmd = a.completions.Update(msg)
-			a.completions = updated.(dialog.CompletionDialog)
-			cmds = append(cmds, cmd)
-
-			return a, tea.Sequence(cmds...)
-		}
-
-		// Handle file completions trigger
-		if keyString == "@" &&
-			!a.showCompletionDialog &&
-			!a.app.IsBashMode {
-			a.showCompletionDialog = true
-
-			updated, cmd := a.editor.Update(msg)
-			a.editor = updated.(chat.EditorComponent)
-			cmds = append(cmds, cmd)
-
-			// Set file, symbols, and agents providers for @ completion
-			a.completions = dialog.NewCompletionDialogComponent("@", a.agentsProvider, a.fileProvider, a.symbolsProvider)
-			updated, cmd = a.completions.Update(msg)
-			a.completions = updated.(dialog.CompletionDialog)
-			cmds = append(cmds, cmd)
-
-			return a, tea.Sequence(cmds...)
-		}
-
-		if keyString == "!" && a.editor.Value() == "" {
+		// 4. Handle shortcuts for Bash Mode trigger
+		if keyString == "!" && a.chatPage.Editor.Value() == "" {
 			a.app.IsBashMode = true
 			return a, nil
-		}
-
-		if a.showCompletionDialog {
-			switch keyString {
-			case "tab", "enter", "esc", "ctrl+c", "up", "down", "ctrl+p", "ctrl+n":
-				updated, cmd := a.completions.Update(msg)
-				a.completions = updated.(dialog.CompletionDialog)
-				cmds = append(cmds, cmd)
-				return a, tea.Batch(cmds...)
-			}
-
-			updated, cmd := a.editor.Update(msg)
-			a.editor = updated.(chat.EditorComponent)
-			cmds = append(cmds, cmd)
-
-			updated, cmd = a.completions.Update(msg)
-			a.completions = updated.(dialog.CompletionDialog)
-			cmds = append(cmds, cmd)
-
-			return a, tea.Batch(cmds...)
-		}
-
-		// 4. Maximize editor responsiveness for printable characters
-		// CRITICAL FIX: Exclude "enter", "tab", "esc", "ctrl+c" so they fall through to command handling
-		// In Bubble Tea v2, these keys may have Text content which causes them to be swallowed here.
-		if msg.Text != "" &&
-			keyString != "enter" &&
-			keyString != "shift+enter" &&
-			keyString != "tab" &&
-			keyString != "esc" &&
-			keyString != "ctrl+c" {
-			updated, cmd := a.editor.Update(msg)
-			a.editor = updated.(chat.EditorComponent)
-			cmds = append(cmds, cmd)
-			return a, tea.Batch(cmds...)
 		}
 
 		// 5. Check for leader key activation
@@ -290,7 +210,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// 6 Handle input clear command
 		inputClearCommand := a.app.Commands[commands.InputClearCommand]
-		if inputClearCommand.Matches(msg, a.app.IsLeaderSequence) && a.editor.Length() > 0 {
+		if inputClearCommand.Matches(msg, a.app.IsLeaderSequence) && a.chatPage.Editor.Length() > 0 {
 			return a, util.CmdHandler(commands.ExecuteCommandMsg(inputClearCommand))
 		}
 
@@ -301,14 +221,14 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case InterruptKeyIdle:
 				// First interrupt key press - start debounce timer
 				a.interruptKeyState = InterruptKeyFirstPress
-				a.editor.SetInterruptKeyInDebounce(true)
+				a.chatPage.Editor.SetInterruptKeyInDebounce(true)
 				return a, tea.Tick(interruptDebounceTimeout, func(t time.Time) tea.Msg {
 					return InterruptDebounceTimeoutMsg{}
 				})
 			case InterruptKeyFirstPress:
 				// Second interrupt key press within timeout - actually interrupt
 				a.interruptKeyState = InterruptKeyIdle
-				a.editor.SetInterruptKeyInDebounce(false)
+				a.chatPage.Editor.SetInterruptKeyInDebounce(false)
 				return a, util.CmdHandler(commands.ExecuteCommandMsg(interruptCommand))
 			}
 		}
@@ -320,25 +240,23 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case ExitKeyIdle:
 				// First exit key press - start debounce timer
 				a.exitKeyState = ExitKeyFirstPress
-				a.editor.SetExitKeyInDebounce(true)
+				a.chatPage.Editor.SetExitKeyInDebounce(true)
 				return a, tea.Tick(exitDebounceTimeout, func(t time.Time) tea.Msg {
 					return ExitDebounceTimeoutMsg{}
 				})
 			case ExitKeyFirstPress:
 				// Second exit key press within timeout - actually exit
 				a.exitKeyState = ExitKeyIdle
-				a.editor.SetExitKeyInDebounce(false)
+				a.chatPage.Editor.SetExitKeyInDebounce(false)
 				return a, util.CmdHandler(commands.ExecuteCommandMsg(exitCommand))
 			}
 		}
 
-		// 9. Check again for commands that don't require leader (excluding interrupt when busy and exit when in debounce)
+		// 9. Check again for commands
 		slog.Debug("[TUI/Commands] Matching", "key", keyString, "leader", a.app.IsLeaderSequence)
 		matches := a.app.Commands.Matches(msg, a.app.IsLeaderSequence)
 
 		if len(matches) == 0 {
-			// Fallback: If "enter" matches nothing, force InputSubmitCommand
-			// This handles cases where the binding is mysteriously missing or overwritten
 			if keyString == "enter" {
 				slog.Warn("[FALLBACK] Forcing InputSubmitCommand for 'enter' (binding mismatch)")
 				cmd := a.app.Commands[commands.InputSubmitCommand]
@@ -351,22 +269,16 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if len(matches) > 0 {
 			slog.Info("[TUI/Commands] Executing", "commands", len(matches), "first", matches[0].Name)
-			// Skip interrupt key if we're in debounce mode and app is busy
 			if interruptCommand.Matches(msg, a.app.IsLeaderSequence) && a.app.IsBusy() && a.interruptKeyState != InterruptKeyIdle {
 				return a, nil
 			}
 			return a, util.CmdHandler(commands.ExecuteCommandsMsg(matches))
 		}
 
-		// Fallback: suspend if ctrl+z is pressed and no user keybind matched
 		if keyString == "ctrl+z" {
 			return a, tea.Suspend
 		}
 
-		// 10. Fallback to editor. This is for other characters like backspace, tab, etc.
-		updatedEditor, cmd := a.editor.Update(msg)
-		a.editor = updatedEditor.(chat.EditorComponent)
-		return a, cmd
 	case tea.MouseWheelMsg:
 		if a.modal != nil {
 			u, cmd := a.modal.Update(msg)
@@ -375,10 +287,6 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(cmds...)
 		}
 
-		updated, cmd := a.messages.Update(msg)
-		a.messages = updated.(chat.MessagesComponent)
-		cmds = append(cmds, cmd)
-		return a, tea.Batch(cmds...)
 	case tea.BackgroundColorMsg:
 		styles.Terminal = &styles.TerminalInfo{
 			Background:       msg.Color,
@@ -395,7 +303,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case modal.CloseModalMsg:
-		a.editor.Focus()
+		a.chatPage.Editor.Focus()
 		var cmd tea.Cmd
 		if a.modal != nil {
 			cmd = a.modal.Close()
@@ -403,7 +311,6 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.modal = nil
 		return a, cmd
 	case dialog.ReopenSessionModalMsg:
-		// Reopen the session modal (used when exiting rename mode)
 		sessionDialog := dialog.NewSessionDialog(a.app)
 		a.modal = sessionDialog
 		return a, nil
@@ -420,8 +327,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case error:
 		return a, toast.NewErrorToast(msg.Error())
 	case app.SendPrompt:
-		a.showCompletionDialog = false
-		// If we're in a child session, switch back to parent before sending prompt
+		a.chatPage.ShowCompletionDialog = false
 		if a.app.Session.ParentID != "" {
 			parentSession, err := a.app.Client.Session.Get(context.Background(), a.app.Session.ParentID, opencode.SessionGetParams{})
 			if err != nil {
@@ -439,7 +345,6 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case app.SendCommand:
-		// If we're in a child session, switch back to parent before sending prompt
 		if a.app.Session.ParentID != "" {
 			parentSession, err := a.app.Client.Session.Get(context.Background(), a.app.Session.ParentID, opencode.SessionGetParams{})
 			if err != nil {
@@ -457,7 +362,6 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case app.SendShell:
-		// If we're in a child session, switch back to parent before sending prompt
 		if a.app.Session.ParentID != "" {
 			parentSession, err := a.app.Client.Session.Get(context.Background(), a.app.Session.ParentID, opencode.SessionGetParams{})
 			if err != nil {
@@ -475,28 +379,20 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case app.SetEditorContentMsg:
-		// Set the editor content without sending
-		a.editor.SetValueWithAttachments(msg.Text)
-		updated, cmd := a.editor.Focus()
-		a.editor = updated.(chat.EditorComponent)
+		a.chatPage.Editor.SetValueWithAttachments(msg.Text)
+		updated, cmd := a.chatPage.Editor.Focus()
+		a.chatPage.Editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 	case app.SessionClearedMsg:
 		a.app.Session = &opencode.Session{}
 		a.app.Messages = []app.Message{}
 	case dialog.CompletionDialogCloseMsg:
-		a.showCompletionDialog = false
+		a.chatPage.ShowCompletionDialog = false
 	case opencode.EventListResponseEventInstallationUpdated:
 		return a, toast.NewSuccessToast(
 			"opencode updated to "+msg.Properties.Version+", restart to apply.",
 			toast.WithTitle("New version installed"),
 		)
-		/*
-			case opencode.EventListResponseEventIdeInstalled:
-				return a, toast.NewSuccessToast(
-					"Installed the opencode extension in "+msg.Properties.Ide,
-					toast.WithTitle(msg.Properties.Ide+" extension installed"),
-				)
-		*/
 	case opencode.EventListResponseEventSessionDeleted:
 		if a.app.Session != nil && msg.Properties.Info.ID == a.app.Session.ID {
 			a.app.Session = &opencode.Session{}
@@ -662,7 +558,7 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slog.Debug("permission updated", "session", msg.Properties.SessionID, "permission", msg.Properties.ID)
 		a.app.Permissions = append(a.app.Permissions, msg.Properties)
 		a.app.CurrentPermission = a.app.Permissions[0]
-		a.editor.Blur()
+		a.chatPage.Editor.Blur()
 	case opencode.EventListResponseEventPermissionReplied:
 		index := slices.IndexFunc(a.app.Permissions, func(p opencode.Permission) bool {
 			return p.ID == msg.Properties.PermissionID
@@ -719,8 +615,8 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			},
 		}
 	case app.SessionSelectedMsg:
-		updated, cmd := a.messages.Update(msg)
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.Update(msg)
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 
 		messages, err := a.app.ListMessages(context.Background(), msg.ID)
@@ -735,8 +631,8 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case app.SessionCreatedMsg:
 		a.app.Session = msg.Session
 	case dialog.ScrollToMessageMsg:
-		updated, cmd := a.messages.ScrollToMessage(msg.MessageID)
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.ScrollToMessage(msg.MessageID)
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case dialog.RestoreToMessageMsg:
 		cmd := func() tea.Msg {
@@ -798,11 +694,11 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InterruptDebounceTimeoutMsg:
 		// Reset interrupt key state after timeout
 		a.interruptKeyState = InterruptKeyIdle
-		a.editor.SetInterruptKeyInDebounce(false)
+		a.chatPage.Editor.SetInterruptKeyInDebounce(false)
 	case ExitDebounceTimeoutMsg:
 		// Reset exit key state after timeout
 		a.exitKeyState = ExitKeyIdle
-		a.editor.SetExitKeyInDebounce(false)
+		a.chatPage.Editor.SetExitKeyInDebounce(false)
 	case tea.PasteMsg, tea.ClipboardMsg:
 		// Paste events: prioritize modal if active, otherwise editor
 		if a.modal != nil {
@@ -810,8 +706,8 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.modal = updatedModal.(layout.Modal)
 			return a, cmd
 		} else {
-			updatedEditor, cmd := a.editor.Update(msg)
-			a.editor = updatedEditor.(chat.EditorComponent)
+			updatedEditor, cmd := a.chatPage.Editor.Update(msg)
+			a.chatPage.Editor = updatedEditor.(chat.EditorComponent)
 			return a, cmd
 		}
 
@@ -840,19 +736,19 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Text string `json:"text"`
 			}
 			json.Unmarshal((msg.Body), &body)
-			existing := a.editor.Value()
+			existing := a.chatPage.Editor.Value()
 			text := body.Text
 			if existing != "" && !strings.HasSuffix(existing, " ") {
 				text = " " + text
 			}
-			a.editor.SetValueWithAttachments(existing + text + " ")
+			a.chatPage.Editor.SetValueWithAttachments(existing + text + " ")
 		case "/tui/submit-prompt":
-			updated, cmd := a.editor.Submit()
-			a.editor = updated.(chat.EditorComponent)
+			updated, cmd := a.chatPage.Editor.Submit()
+			a.chatPage.Editor = updated.(chat.EditorComponent)
 			cmds = append(cmds, cmd)
 		case "/tui/clear-prompt":
-			updated, cmd := a.editor.Clear()
-			a.editor = updated.(chat.EditorComponent)
+			updated, cmd := a.chatPage.Editor.Clear()
+			a.chatPage.Editor = updated.(chat.EditorComponent)
 			cmds = append(cmds, cmd)
 		case "/tui/execute-command":
 			var body struct {
@@ -923,12 +819,10 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	a.status = s.(status.StatusComponent)
 
-	updatedEditor, cmd := a.editor.Update(msg)
-	a.editor = updatedEditor.(chat.EditorComponent)
-	cmds = append(cmds, cmd)
-
-	updatedMessages, cmd := a.messages.Update(msg)
-	a.messages = updatedMessages.(chat.MessagesComponent)
+	updatedPage, cmd := a.chatPage.Update(msg)
+	if p, ok := updatedPage.(*chatpage.Page); ok {
+		a.chatPage = p
+	}
 	cmds = append(cmds, cmd)
 
 	if a.modal != nil {
@@ -937,245 +831,30 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	if a.showCompletionDialog {
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(dialog.CompletionDialog)
-		cmds = append(cmds, cmd)
-	}
-
 	return a, tea.Batch(cmds...)
 }
 
 func (a Model) View() (string, *tea.Cursor) {
-	t := theme.CurrentTheme()
-
-	var mainLayout string
-
-	var editorX int
-	var editorY int
-	if a.app.Session.ID == "" {
-		mainLayout, editorX, editorY = a.home()
-	} else {
-		mainLayout, editorX, editorY = a.chat()
-	}
-	mainLayout = styles.NewStyle().
-		Background(t.Background()).
-		Padding(0, 2).
-		Render(mainLayout)
-	mainLayout = lipgloss.PlaceHorizontal(
-		a.width,
-		lipgloss.Center,
-		mainLayout,
-		styles.WhitespaceStyle(t.Background()),
-	)
-
-	mainStyle := styles.NewStyle().Background(t.Background())
-	mainLayout = mainStyle.Render(mainLayout)
+	pageView := a.chatPage.View()
+	cursor := a.chatPage.Cursor()
 
 	if a.modal != nil {
-		mainLayout = a.modal.Render(mainLayout)
+		pageView = a.modal.Render(pageView)
 	}
-	mainLayout = a.toastManager.RenderOverlay(mainLayout)
+	pageView = a.toastManager.RenderOverlay(pageView)
 
 	if theme.CurrentThemeUsesAnsiColors() {
-		mainLayout = util.ConvertRGBToAnsi16Colors(mainLayout)
+		pageView = util.ConvertRGBToAnsi16Colors(pageView)
 	}
 
-	cursor := a.editor.Cursor()
-	cursor.Position.X += editorX
-	cursor.Position.Y += editorY
-
-	return mainLayout + "\n" + a.status.View(), cursor
+	return pageView + "\n" + a.status.View(), cursor
 }
 
 func (a Model) Cleanup() {
 	a.status.Cleanup()
 }
 
-func (a Model) home() (string, int, int) {
-	t := theme.CurrentTheme()
-	effectiveWidth := a.width - 4
-	baseStyle := styles.NewStyle().Foreground(t.Text()).Background(t.Background())
-	base := baseStyle.Render
-	muted := styles.NewStyle().Foreground(t.TextMuted()).Background(t.Background()).Render
-
-	open := `
-                    
-█▀▀█ █▀▀█ █▀▀█ █▀▀▄ 
-█░░█ █░░█ █▀▀▀ █░░█ 
-▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ `
-
-	code := `
-             ▄
-█▀▀▀ █▀▀█ █▀▀█ █▀▀█
-█░░░ █░░█ █░░█ █▀▀▀
-▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`
-
-	logo := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		muted(open),
-		base(code),
-	)
-	// cwd := app.Info.Path.Cwd
-	// config := app.Info.Path.Config
-
-	versionStyle := styles.NewStyle().
-		Foreground(t.TextMuted()).
-		Background(t.Background()).
-		Width(lipgloss.Width(logo)).
-		Align(lipgloss.Right)
-	version := versionStyle.Render(a.app.Version)
-
-	logoAndVersion := strings.Join([]string{logo, version}, "\n")
-	logoAndVersion = lipgloss.PlaceHorizontal(
-		effectiveWidth,
-		lipgloss.Center,
-		logoAndVersion,
-		styles.WhitespaceStyle(t.Background()),
-	)
-
-	// Use limit of 4 for vscode, 6 for others
-	limit := 5
-	if util.IsVSCode() {
-		limit = 3
-	}
-
-	showVscode := util.IsVSCode()
-	commandsView := cmdcomp.New(
-		a.app,
-		cmdcomp.WithBackground(t.Background()),
-		cmdcomp.WithLimit(limit),
-		cmdcomp.WithVscode(showVscode),
-	)
-	cmds := lipgloss.PlaceHorizontal(
-		effectiveWidth,
-		lipgloss.Center,
-		commandsView.View(),
-		styles.WhitespaceStyle(t.Background()),
-	)
-
-	lines := []string{}
-	lines = append(lines, "")
-	lines = append(lines, logoAndVersion)
-	lines = append(lines, "")
-	lines = append(lines, cmds)
-	lines = append(lines, "")
-	lines = append(lines, "")
-
-	mainHeight := lipgloss.Height(strings.Join(lines, "\n"))
-
-	editorView := a.editor.View()
-	editorWidth := lipgloss.Width(editorView)
-	editorView = lipgloss.PlaceHorizontal(
-		effectiveWidth,
-		lipgloss.Center,
-		editorView,
-		styles.WhitespaceStyle(t.Background()),
-	)
-	lines = append(lines, editorView)
-
-	editorLines := a.editor.Lines()
-
-	mainLayout := lipgloss.Place(
-		effectiveWidth,
-		a.height,
-		lipgloss.Center,
-		lipgloss.Center,
-		baseStyle.Render(strings.Join(lines, "\n")),
-		styles.WhitespaceStyle(t.Background()),
-	)
-
-	editorX := max(0, (effectiveWidth-editorWidth)/2)
-	editorY := (a.height / 2) + (mainHeight / 2) - 3
-	editorYDelta := 3
-
-	if editorLines > 1 {
-		editorYDelta = 2
-		content := a.editor.Content()
-		editorHeight := lipgloss.Height(content)
-
-		if editorY+editorHeight > a.height {
-			difference := (editorY + editorHeight) - a.height
-			editorY -= difference
-		}
-		mainLayout = layout.PlaceOverlay(
-			editorX,
-			editorY,
-			content,
-			mainLayout,
-		)
-	}
-
-	if a.showCompletionDialog {
-		a.completions.SetWidth(editorWidth)
-		overlay := a.completions.View()
-		overlayHeight := lipgloss.Height(overlay)
-
-		mainLayout = layout.PlaceOverlay(
-			editorX,
-			editorY-overlayHeight+2,
-			overlay,
-			mainLayout,
-		)
-	}
-
-	return mainLayout, editorX + 5, editorY + editorYDelta
-}
-
-func (a Model) chat() (string, int, int) {
-	effectiveWidth := a.width - 4
-	t := theme.CurrentTheme()
-	editorView := a.editor.View()
-	lines := a.editor.Lines()
-	messagesView := a.messages.View()
-
-	editorWidth := lipgloss.Width(editorView)
-	editorHeight := max(lines, 5)
-	editorView = lipgloss.PlaceHorizontal(
-		effectiveWidth,
-		lipgloss.Center,
-		editorView,
-		styles.WhitespaceStyle(t.Background()),
-	)
-
-	mainLayout := messagesView + "\n" + editorView
-	editorX := max(0, (effectiveWidth-editorWidth)/2)
-	editorY := a.height - editorHeight
-
-	if lines > 1 {
-		content := a.editor.Content()
-		editorHeight := lipgloss.Height(content)
-		if editorY+editorHeight > a.height {
-			difference := (editorY + editorHeight) - a.height
-			editorY -= difference
-		}
-		mainLayout = layout.PlaceOverlay(
-			editorX,
-			editorY,
-			content,
-			mainLayout,
-		)
-	}
-
-	if a.showCompletionDialog {
-		a.completions.SetWidth(editorWidth)
-		overlay := a.completions.View()
-		overlayHeight := lipgloss.Height(overlay)
-		editorY := a.height - editorHeight + 1
-
-		mainLayout = layout.PlaceOverlay(
-			editorX,
-			editorY-overlayHeight,
-			overlay,
-			mainLayout,
-		)
-	}
-
-	return mainLayout, editorX + 5, editorY + 2
-}
-
 func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
 	cmds := []tea.Cmd{
 		util.CmdHandler(commands.CommandExecutedMsg(command)),
 	}
@@ -1201,17 +880,17 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 			return a, toast.NewErrorToast("No editor found. Set EDITOR environment variable (e.g., export EDITOR=vim)")
 		}
 
-		value := a.editor.Value()
+		value := a.chatPage.Editor.Value()
 
 		// Expand text attachments before opening editor
-		for _, att := range a.editor.GetAttachments() {
+		for _, att := range a.chatPage.Editor.GetAttachments() {
 			if textSource, ok := att.GetTextSource(); ok {
 				value = strings.Replace(value, att.Display, textSource.Value, 1)
 			}
 		}
 
-		updated, cmd := a.editor.Clear()
-		a.editor = updated.(chat.EditorComponent)
+		updated, cmd := a.chatPage.Editor.Clear()
+		a.chatPage.Editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 
 		tmpfile, err := os.CreateTemp("", "msg_*.md")
@@ -1370,132 +1049,17 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 
 			return app.SessionSelectedMsg(nextSession)
 		})
-	case commands.SessionChildCycleReverseCommand:
-		if a.app.Session.ID == "" {
-			return a, nil
-		}
-		cmds = append(cmds, func() tea.Msg {
-			parentSessionID := a.app.Session.ID
-			var parentSession *opencode.Session
-			if a.app.Session.ParentID != "" {
-				parentSessionID = a.app.Session.ParentID
-				session, err := a.app.Client.Session.Get(
-					context.Background(),
-					parentSessionID,
-					opencode.SessionGetParams{},
-				)
-				if err != nil {
-					slog.Error("Failed to get parent session", "error", err)
-					return toast.NewErrorToast("Failed to get parent session")
-				}
-				parentSession = session
-			} else {
-				parentSession = a.app.Session
-			}
 
-			children, err := a.app.Client.Session.Children(
-				context.Background(),
-				parentSessionID,
-				opencode.SessionChildrenParams{},
-			)
-			if err != nil {
-				slog.Error("Failed to get session children", "error", err)
-				return toast.NewErrorToast("Failed to get session children")
-			}
-
-			// Reverse sort the children (newest first)
-			slices.Reverse(*children)
-
-			// Create combined array: [parent, child1, child2, ...]
-			sessions := []*opencode.Session{parentSession}
-			for i := range *children {
-				sessions = append(sessions, &(*children)[i])
-			}
-
-			if len(sessions) == 1 {
-				return toast.NewInfoToast("No child sessions available")
-			}
-
-			// Find current session index in combined array
-			currentIndex := -1
-			for i, session := range sessions {
-				if session.ID == a.app.Session.ID {
-					currentIndex = i
-					break
-				}
-			}
-
-			// If session not found, default to parent (shouldn't happen)
-			if currentIndex == -1 {
-				currentIndex = 0
-			}
-
-			// Cycle to previous session (parent or child)
-			nextIndex := (currentIndex - 1 + len(sessions)) % len(sessions)
-			nextSession := sessions[nextIndex]
-
-			return app.SessionSelectedMsg(nextSession)
-		})
-	case commands.SessionExportCommand:
-		if a.app.Session.ID == "" {
-			return a, toast.NewErrorToast("No active session to export.")
-		}
-
-		// Use current conversation history
-		messages := a.app.Messages
-		if len(messages) == 0 {
-			return a, toast.NewInfoToast("No messages to export.")
-		}
-
-		// Format to Markdown
-		markdownContent := formatConversationToMarkdown(messages)
-
-		editor := util.GetEditor()
-		if editor == "" {
-			return a, toast.NewErrorToast("No editor found. Set EDITOR environment variable (e.g., export EDITOR=vim)")
-		}
-
-		// Create and write to temp file
-		tmpfile, err := os.CreateTemp("", "conversation-*.md")
-		if err != nil {
-			slog.Error("Failed to create temp file", "error", err)
-			return a, toast.NewErrorToast("Failed to create temporary file.")
-		}
-
-		_, err = tmpfile.WriteString(markdownContent)
-		if err != nil {
-			slog.Error("Failed to write to temp file", "error", err)
-			tmpfile.Close()
-			os.Remove(tmpfile.Name())
-			return a, toast.NewErrorToast("Failed to write conversation to file.")
-		}
-		tmpfile.Close()
-
-		// Open in editor
-		parts := strings.Fields(editor)
-		c := exec.Command(parts[0], append(parts[1:], tmpfile.Name())...) //nolint:gosec
-		c.Stdin = os.Stdin
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		cmd = tea.ExecProcess(c, func(err error) tea.Msg {
-			if err != nil {
-				slog.Error("Failed to open editor for conversation", "error", err)
-			}
-			// Clean up the file after editor closes
-			os.Remove(tmpfile.Name())
-			return nil
-		})
-		cmds = append(cmds, cmd)
 	case commands.ToolDetailsCommand:
 		message := "Tool details are now visible"
-		if a.messages.ToolDetailsVisible() {
+		if a.chatPage.Messages.ToolDetailsVisible() {
 			message = "Tool details are now hidden"
 		}
 		cmds = append(cmds, util.CmdHandler(chat.ToggleToolDetailsMsg{}))
 		cmds = append(cmds, toast.NewInfoToast(message))
 	case commands.ThinkingBlocksCommand:
 		message := "Thinking blocks are now visible"
-		if a.messages.ThinkingBlocksVisible() {
+		if a.chatPage.Messages.ThinkingBlocksVisible() {
 			message = "Thinking blocks are now hidden"
 		}
 		cmds = append(cmds, util.CmdHandler(chat.ToggleThinkingBlocksMsg{}))
@@ -1522,61 +1086,61 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 	case commands.ProjectInitCommand:
 		cmds = append(cmds, a.app.InitializeProject(context.Background()))
 	case commands.InputClearCommand:
-		if a.editor.Value() == "" {
+		if a.chatPage.Editor.Value() == "" {
 			return a, nil
 		}
-		updated, cmd := a.editor.Clear()
-		a.editor = updated.(chat.EditorComponent)
+		updated, cmd := a.chatPage.Editor.Clear()
+		a.chatPage.Editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 	case commands.InputPasteCommand:
-		updated, cmd := a.editor.Paste()
-		a.editor = updated.(chat.EditorComponent)
+		updated, cmd := a.chatPage.Editor.Paste()
+		a.chatPage.Editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 	case commands.InputSubmitCommand:
 		slog.Info("[InputSubmitCommand] Calling editor.Submit()")
-		updated, cmd := a.editor.Submit()
-		a.editor = updated.(chat.EditorComponent)
+		updated, cmd := a.chatPage.Editor.Submit()
+		a.chatPage.Editor = updated.(chat.EditorComponent)
 
 		cmds = append(cmds, cmd)
 	case commands.InputNewlineCommand:
-		updated, cmd := a.editor.Newline()
-		a.editor = updated.(chat.EditorComponent)
+		updated, cmd := a.chatPage.Editor.Newline()
+		a.chatPage.Editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesFirstCommand:
-		updated, cmd := a.messages.GotoTop()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.GotoTop()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesLastCommand:
-		updated, cmd := a.messages.GotoBottom()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.GotoBottom()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesPageUpCommand:
-		updated, cmd := a.messages.PageUp()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.PageUp()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesPageDownCommand:
-		updated, cmd := a.messages.PageDown()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.PageDown()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesHalfPageUpCommand:
-		updated, cmd := a.messages.HalfPageUp()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.HalfPageUp()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesHalfPageDownCommand:
-		updated, cmd := a.messages.HalfPageDown()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.HalfPageDown()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesCopyCommand:
-		updated, cmd := a.messages.CopyLastMessage()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.CopyLastMessage()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesUndoCommand:
-		updated, cmd := a.messages.UndoLastMessage()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.UndoLastMessage()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesRedoCommand:
-		updated, cmd := a.messages.RedoLastMessage()
-		a.messages = updated.(chat.MessagesComponent)
+		updated, cmd := a.chatPage.Messages.RedoLastMessage()
+		a.chatPage.Messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.AppExitCommand:
 		return a, tea.Quit
@@ -1585,14 +1149,6 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 }
 
 func NewModel(app *app.App) tea.Model {
-	commandProvider := completions.NewCommandCompletionProvider(app)
-	fileProvider := completions.NewFileContextGroup(app)
-	symbolsProvider := completions.NewSymbolsContextGroup(app)
-	agentsProvider := completions.NewAgentsContextGroup(app)
-
-	messages := chat.NewMessagesComponent(app)
-	editor := chat.NewEditorComponent(app)
-	completions := dialog.NewCompletionDialogComponent("/", commandProvider)
 
 	var leaderBinding *key.Binding
 	if app.Config.Keybinds.Leader != "" {
@@ -1601,20 +1157,14 @@ func NewModel(app *app.App) tea.Model {
 	}
 
 	model := &Model{
-		status:               status.NewStatusCmp(app),
-		app:                  app,
-		editor:               editor,
-		messages:             messages,
-		completions:          completions,
-		commandProvider:      commandProvider,
-		fileProvider:         fileProvider,
-		symbolsProvider:      symbolsProvider,
-		agentsProvider:       agentsProvider,
-		leaderBinding:        leaderBinding,
-		showCompletionDialog: false,
-		toastManager:         toast.NewToastManager(),
-		interruptKeyState:    InterruptKeyIdle,
-		exitKeyState:         ExitKeyIdle,
+		status:            status.NewStatusCmp(app),
+		app:               app,
+		chatPage:          chatpage.New(app),
+		leaderBinding:     leaderBinding,
+		toastManager:      toast.NewToastManager(),
+		interruptKeyState: InterruptKeyIdle,
+		exitKeyState:      ExitKeyIdle,
+		messagesRight:     true,
 	}
 
 	return model
