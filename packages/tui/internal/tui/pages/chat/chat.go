@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -11,11 +12,15 @@ import (
 	chatcomp "github.com/sst/opencode/internal/components/chat"
 	cmdcomp "github.com/sst/opencode/internal/components/commands"
 	"github.com/sst/opencode/internal/components/dialog"
+	"github.com/sst/opencode/internal/components/sidebar"
 	"github.com/sst/opencode/internal/layout"
 	"github.com/sst/opencode/internal/styles"
 	"github.com/sst/opencode/internal/theme"
 	"github.com/sst/opencode/internal/util"
 )
+
+// ToggleSidebarMsg is sent when the sidebar should be toggled
+type ToggleSidebarMsg struct{}
 
 type Page struct {
 	width, height int
@@ -26,6 +31,7 @@ type Page struct {
 	Messages    chatcomp.MessagesComponent
 	Completions dialog.CompletionDialog
 	DidYouKnow  *dialog.DidYouKnow
+	Sidebar     sidebar.SidebarComponent
 
 	// Providers
 	CommandProvider completions.CompletionProvider
@@ -45,6 +51,7 @@ func New(app *app.App) *Page {
 		Messages:    chatcomp.NewMessagesComponent(app),
 		Completions: dialog.NewCompletionDialogComponent("", nil),
 		DidYouKnow:  dialog.NewDidYouKnow(app),
+		Sidebar:     sidebar.NewSidebarComponent(app),
 	}
 
 	// Initialize providers
@@ -61,6 +68,7 @@ func (p *Page) Init() tea.Cmd {
 		p.Editor.Init(),
 		p.Messages.Init(),
 		p.Completions.Init(),
+		p.Sidebar.Init(),
 	)
 }
 
@@ -68,6 +76,14 @@ func (p *Page) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case ToggleSidebarMsg:
+		p.Sidebar.Toggle()
+		if p.Sidebar.IsVisible() {
+			cmds = append(cmds, p.app.FetchMCPStatus(context.Background()))
+			cmds = append(cmds, p.app.FetchLSPStatus(context.Background()))
+		}
+		return p, tea.Batch(cmds...)
+
 	case tea.WindowSizeMsg:
 		p.SetSize(msg.Width, msg.Height)
 		// Propagate resize to components
@@ -94,6 +110,11 @@ func (p *Page) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.Completions = updatedCompletions.(dialog.CompletionDialog)
 			cmds = append(cmds, cmd)
 		}
+
+		// Update sidebar with window size
+		updatedSidebar, cmd := p.Sidebar.Update(msg)
+		p.Sidebar = updatedSidebar.(sidebar.SidebarComponent)
+		cmds = append(cmds, cmd)
 
 		return p, tea.Batch(cmds...)
 
@@ -202,12 +223,23 @@ func (p *Page) View() string {
 		Background(t.Background()).
 		Padding(0, 2).
 		Render(mainLayout)
-	mainLayout = lipgloss.PlaceHorizontal(
-		p.width,
-		lipgloss.Center,
-		mainLayout,
-		styles.WhitespaceStyle(t.Background()),
-	)
+
+	// If sidebar is visible, join it with main content
+	if p.Sidebar.IsVisible() {
+		sidebarView := p.Sidebar.View()
+		mainLayout = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			mainLayout,
+			sidebarView,
+		)
+	} else {
+		mainLayout = lipgloss.PlaceHorizontal(
+			p.width,
+			lipgloss.Center,
+			mainLayout,
+			styles.WhitespaceStyle(t.Background()),
+		)
+	}
 
 	mainStyle := styles.NewStyle().Background(t.Background())
 	mainLayout = mainStyle.Render(mainLayout)

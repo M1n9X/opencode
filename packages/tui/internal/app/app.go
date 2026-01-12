@@ -27,6 +27,59 @@ type Message struct {
 	Parts []opencode.PartUnion
 }
 
+// MCPStatus represents the status of an MCP server
+type MCPStatus struct {
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// LSPStatus represents the status of an LSP server
+type LSPStatus struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Root   string `json:"root"`
+}
+
+// Todo represents a todo item (matches SDK EventListResponseEventTodoUpdatedPropertiesTodo)
+type Todo struct {
+	ID       string `json:"id"`
+	Content  string `json:"content"`
+	Priority string `json:"priority"` // "high", "medium", "low"
+	Status   string `json:"status"`   // "pending", "in_progress", "completed", "cancelled"
+}
+
+// SessionDiff represents a file diff in the session
+type SessionDiff struct {
+	File      string `json:"file"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// QuestionOption represents an option for a question
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// QuestionInfo represents a single question
+type QuestionInfo struct {
+	Question string           `json:"question"`
+	Header   string           `json:"header"`
+	Options  []QuestionOption `json:"options"`
+	Multiple bool             `json:"multiple"`
+}
+
+// QuestionRequest represents a question request from the AI
+type QuestionRequest struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"sessionID"`
+	Questions []QuestionInfo `json:"questions"`
+	Tool      *struct {
+		MessageID string `json:"messageID"`
+		CallID    string `json:"callID"`
+	} `json:"tool,omitempty"`
+}
+
 type App struct {
 	Project           opencode.Project
 	Agents            []opencode.Agent
@@ -52,6 +105,16 @@ type App struct {
 	IsLeaderSequence  bool
 	IsBashMode        bool
 	ScrollSpeed       int
+
+	// Sidebar data
+	MCPStatus   map[string]MCPStatus
+	LSPStatus   []LSPStatus
+	Todos       []Todo
+	SessionDiff []SessionDiff
+
+	// Question handling
+	Questions       []QuestionRequest
+	CurrentQuestion *QuestionRequest
 }
 
 func (a *App) Agent() *opencode.Agent {
@@ -212,9 +275,82 @@ func New(
 		InitialAgent:   initialAgent,
 		InitialSession: initialSession,
 		ScrollSpeed:    int(configInfo.Tui.ScrollSpeed),
+		MCPStatus:      make(map[string]MCPStatus),
 	}
 
 	return app, nil
+}
+
+// FetchMCPStatus fetches the current MCP server status
+func (a *App) FetchMCPStatus(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		var resp struct {
+			Data map[string]MCPStatus `json:"data"`
+		}
+		err := a.Client.Get(ctx, "/mcp/status", nil, &resp)
+		if err != nil {
+			slog.Error("Failed to fetch MCP status", "error", err)
+		}
+		return MCPStatusLoadedMsg(resp.Data)
+	}
+}
+
+// MCPStatusLoadedMsg is sent when MCP status is loaded
+type MCPStatusLoadedMsg map[string]MCPStatus
+
+// FetchLSPStatus fetches the current LSP server status
+func (a *App) FetchLSPStatus(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		var resp struct {
+			Data []LSPStatus `json:"data"`
+		}
+		err := a.Client.Get(ctx, "/lsp/status", nil, &resp)
+		if err != nil {
+			slog.Error("Failed to fetch LSP status", "error", err)
+		}
+		return LSPStatusLoadedMsg(resp.Data)
+	}
+}
+
+// LSPStatusLoadedMsg is sent when LSP status is loaded
+type LSPStatusLoadedMsg []LSPStatus
+
+// QuestionAskedMsg is sent when a question is asked (via polling or event)
+type QuestionAskedMsg struct {
+	Request QuestionRequest
+}
+
+// QuestionRepliedMsg is sent when a question is replied
+type QuestionRepliedMsg struct {
+	SessionID string
+	RequestID string
+}
+
+// QuestionRejectedMsg is sent when a question is rejected
+type QuestionRejectedMsg struct {
+	SessionID string
+	RequestID string
+}
+
+// FetchPendingQuestions fetches pending questions from the server
+func (a *App) FetchPendingQuestions(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		var resp struct {
+			Data []QuestionRequest `json:"data"`
+		}
+		err := a.Client.Get(ctx, "/question", nil, &resp)
+		if err != nil {
+			slog.Error("Failed to fetch pending questions", "error", err)
+			return nil
+		}
+		// Return the first pending question if any
+		for _, q := range resp.Data {
+			if q.SessionID == a.Session.ID {
+				return QuestionAskedMsg{Request: q}
+			}
+		}
+		return nil
+	}
 }
 
 func (a *App) Keybind(commandName commands.CommandName) string {

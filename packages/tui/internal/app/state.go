@@ -40,6 +40,7 @@ type State struct {
 	ShowToolDetails    *bool                 `toml:"show_tool_details"`
 	ShowThinkingBlocks *bool                 `toml:"show_thinking_blocks"`
 	TipsVisible        *bool                 `toml:"tips_visible"`
+	SidebarVisible     *bool                 `toml:"sidebar_visible"`
 }
 
 type StashEntry struct {
@@ -49,6 +50,7 @@ type StashEntry struct {
 
 func NewState() *State {
 	trueVal := true
+	falseVal := false
 	return &State{
 		Theme:              "opencode",
 		Agent:              "build",
@@ -59,6 +61,7 @@ func NewState() *State {
 		MessageHistory:     make([]Prompt, 0),
 		PromptStash:        make([]StashEntry, 0),
 		TipsVisible:        &trueVal,
+		SidebarVisible:     &falseVal,
 	}
 }
 

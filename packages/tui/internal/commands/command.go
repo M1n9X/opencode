@@ -127,11 +127,14 @@ const (
 	SessionNewCommand               CommandName = "session_new"
 	SessionListCommand              CommandName = "session_list"
 	SessionTimelineCommand          CommandName = "session_timeline"
+	SessionForkCommand              CommandName = "session_fork"
 	SessionShareCommand             CommandName = "session_share"
 	SessionUnshareCommand           CommandName = "session_unshare"
 	SessionInterruptCommand         CommandName = "session_interrupt"
 	SessionCompactCommand           CommandName = "session_compact"
 	SessionExportCommand            CommandName = "session_export"
+	SessionRenameCommand            CommandName = "session_rename"
+	SidebarToggleCommand            CommandName = "sidebar_toggle"
 	ToolDetailsCommand              CommandName = "tool_details"
 	ThinkingBlocksCommand           CommandName = "thinking_blocks"
 	ModelListCommand                CommandName = "model_list"
@@ -237,6 +240,24 @@ func LoadFromConfig(config *opencode.Config, customCommands []opencode.Command) 
 			Description: "show session timeline",
 			Keybindings: parseBindings("<leader>g"),
 			Trigger:     []string{"timeline", "history", "goto"},
+		},
+		{
+			Name:        SessionForkCommand,
+			Description: "fork from message",
+			Keybindings: parseBindings("<leader>f"),
+			Trigger:     []string{"fork"},
+		},
+		{
+			Name:        SessionRenameCommand,
+			Description: "rename session",
+			Keybindings: parseBindings("<leader>R"),
+			Trigger:     []string{"rename"},
+		},
+		{
+			Name:        SidebarToggleCommand,
+			Description: "toggle sidebar",
+			Keybindings: parseBindings("<leader>b"),
+			Trigger:     []string{"sidebar"},
 		},
 		{
 			Name:        SessionShareCommand,

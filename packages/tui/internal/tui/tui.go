@@ -83,6 +83,9 @@ func (a Model) Init() tea.Cmd {
 	cmds = append(cmds, a.chatPage.Init())
 	cmds = append(cmds, a.status.Init())
 	cmds = append(cmds, a.toastManager.Init())
+	// Fetch sidebar data
+	cmds = append(cmds, a.app.FetchMCPStatus(context.Background()))
+	cmds = append(cmds, a.app.FetchLSPStatus(context.Background()))
 
 	return tea.Batch(cmds...)
 }
@@ -610,6 +613,75 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Properties.SessionID == a.app.Session.ID {
 			return a, toast.NewSuccessToast("Session compacted successfully")
 		}
+	case opencode.EventListResponseEventTodoUpdated:
+		// Update todos for the current session
+		if msg.Properties.SessionID == a.app.Session.ID {
+			a.app.Todos = make([]app.Todo, len(msg.Properties.Todos))
+			for i, todo := range msg.Properties.Todos {
+				a.app.Todos[i] = app.Todo{
+					ID:       todo.ID,
+					Content:  todo.Content,
+					Priority: todo.Priority,
+					Status:   todo.Status,
+				}
+			}
+		}
+	case opencode.EventListResponseEventSessionIdle:
+		// Session became idle - check for pending questions
+		if msg.Properties.SessionID == a.app.Session.ID {
+			cmds = append(cmds, a.app.FetchPendingQuestions(context.Background()))
+		}
+	case app.MCPStatusLoadedMsg:
+		// Update MCP status for sidebar
+		for name, status := range msg {
+			a.app.MCPStatus[name] = app.MCPStatus{
+				Status: status.Status,
+				Error:  status.Error,
+			}
+		}
+	case app.LSPStatusLoadedMsg:
+		// Update LSP status for sidebar
+		a.app.LSPStatus = make([]app.LSPStatus, len(msg))
+		for i, status := range msg {
+			a.app.LSPStatus[i] = app.LSPStatus{
+				ID:     status.ID,
+				Status: status.Status,
+				Root:   status.Root,
+			}
+		}
+	case app.QuestionAskedMsg:
+		// Handle question asked event - show question dialog
+		if msg.Request.SessionID == a.app.Session.ID {
+			a.app.CurrentQuestion = &msg.Request
+			questionDialog := dialog.NewQuestionDialog(a.app, msg.Request)
+			a.modal = questionDialog
+			a.chatPage.Editor.Blur()
+		}
+	case app.QuestionRepliedMsg:
+		// Handle question replied event - clear current question if it matches
+		if a.app.CurrentQuestion != nil && a.app.CurrentQuestion.ID == msg.RequestID {
+			a.app.CurrentQuestion = nil
+		}
+	case app.QuestionRejectedMsg:
+		// Handle question rejected event - clear current question if it matches
+		if a.app.CurrentQuestion != nil && a.app.CurrentQuestion.ID == msg.RequestID {
+			a.app.CurrentQuestion = nil
+		}
+	case dialog.QuestionDismissedMsg:
+		// Question dialog was dismissed - clear current question and close modal
+		a.app.CurrentQuestion = nil
+		a.chatPage.Editor.Focus()
+		a.modal = nil
+	case dialog.OpenSubagentSessionMsg:
+		// Handle opening a subagent's session
+		return a, func() tea.Msg {
+			session, err := a.app.Client.Session.Get(context.Background(), msg.SessionID, opencode.SessionGetParams{})
+			if err != nil {
+				slog.Error("Failed to get subagent session", "error", err)
+				return toast.NewErrorToast("Failed to open subagent session")()
+			}
+			return app.SessionSelectedMsg(session)
+		}
 	case tea.WindowSizeMsg:
 		msg.Height -= 2 // Make space for the status bar
 		a.width, a.height = msg.Width, msg.Height
@@ -958,6 +1030,21 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 		}
 		navigationDialog := dialog.NewTimelineDialog(a.app)
 		a.modal = navigationDialog
+	case commands.SessionForkCommand:
+		if a.app.Session.ID == "" {
+			return a, toast.NewErrorToast("No active session")
+		}
+		forkDialog := dialog.NewForkDialog(a.app)
+		a.modal = forkDialog
+	case commands.SessionRenameCommand:
+		if a.app.Session.ID == "" {
+			return a, toast.NewErrorToast("No active session")
+		}
+		renameDialog := dialog.NewRenameDialog(a.app)
+		a.modal = renameDialog
+	case commands.SidebarToggleCommand:
+		// Toggle sidebar visibility - handled in chat page
+		cmds = append(cmds, util.CmdHandler(chatpage.ToggleSidebarMsg{}))
 	case commands.SessionShareCommand:
 		if a.app.Session.ID == "" {
 			return a, nil
