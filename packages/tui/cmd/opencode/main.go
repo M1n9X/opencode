@@ -57,15 +57,22 @@ func main() {
 	}
 
 	// 4. Fetch Agents (Required by app.New to avoid panic)
-	agents, err := client.Agent.List(ctx, opencode.AgentListParams{
+	agentsPtr, err := client.Agent.List(ctx, opencode.AgentListParams{
 		Directory: opencode.F(cwd),
 	})
 	if err != nil {
-		// Log but try to proceed with nil? No, app.New panics on empty agents.
-		// We'll create a dummy agent if list fails/empty to prevent crash in New.
 		slog.Error("Failed to list agents", "error", err)
 	}
+
+	var agents []opencode.Agent
+	if agentsPtr != nil {
+		agents = *agentsPtr
+	}
+
 	// Fallback dummy if empty to prevent startup panic
+	// app.New logic uses index functions that might fail on empty, checking assumption.
+	// Actually app.New handles fetching, but agentIndex calculation requires non-empty if initialAgent is set or defaults.
+	// We'll provide a dummy if absolutely empty.
 	if len(agents) == 0 {
 		agents = []opencode.Agent{
 			{Name: "default", Mode: "chat", Description: "Fallback Agent"},
