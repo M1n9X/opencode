@@ -205,6 +205,30 @@ func renderContentBlock(
 	return content
 }
 
+type toolRenderResult struct {
+	content string
+	height  int
+	zoneID  string
+}
+
+func renderCodeBlockSegment(
+	segment util.Segment,
+	width int,
+	backgroundColor compat.AdaptiveColor,
+	expanded bool,
+) (rendered string, height int, overflow bool) {
+	lines := strings.Split(segment.Content, "\n")
+	overflow = len(lines) > 10
+	content := segment.Content
+	if overflow && !expanded {
+		content = strings.Join(lines[:10], "\n") + "\n…"
+	}
+	markdown := fmt.Sprintf("```%s\n%s\n```", segment.Language, content)
+	rendered = util.ToMarkdown(markdown, width, backgroundColor)
+	height = lipgloss.Height(rendered)
+	return
+}
+
 func renderText(
 	app *app.App,
 	message opencode.MessageUnion,
@@ -218,6 +242,9 @@ func renderText(
 	shimmer bool,
 	fileParts []opencode.FilePart,
 	agentParts []opencode.AgentPart,
+	expandedCodeBlocks map[string]bool,
+	interactiveZones *[]InteractiveZone,
+	baseY int,
 	toolCalls ...opencode.ToolPart,
 ) string {
 	t := theme.CurrentTheme()
@@ -235,7 +262,62 @@ func renderText(
 		if casted.Time.Completed > 0 {
 			ts = time.UnixMilli(int64(casted.Time.Completed))
 		}
-		content = util.ToMarkdown(text, width, backgroundColor)
+
+		if !isThinking && strings.TrimSpace(text) != "Generating..." && expandedCodeBlocks != nil && interactiveZones != nil {
+			segments := util.SplitMarkdown(text)
+			var sb strings.Builder
+			currentY := baseY
+
+			for i, segment := range segments {
+				if segment.Type == util.SegmentCode {
+					key := fmt.Sprintf("%s-%d", casted.ID, i)
+					expanded := expandedCodeBlocks[key]
+					renderedBlock, blockHeight, overflow := renderCodeBlockSegment(segment, width, backgroundColor, expanded)
+					if sb.Len() > 0 {
+						sb.WriteString("\n")
+						currentY++
+					}
+					sb.WriteString(renderedBlock)
+					if overflow {
+						footerText := "Click to expand"
+						if expanded {
+							footerText = "Click to collapse"
+						}
+						footerStyle := styles.NewStyle().
+							Foreground(t.TextMuted()).
+							Background(backgroundColor).
+							Italic(true).
+							MarginTop(0).
+							Render(footerText)
+						sb.WriteString("\n")
+						sb.WriteString(footerStyle)
+						footerHeight := lipgloss.Height(footerStyle)
+						*interactiveZones = append(*interactiveZones, InteractiveZone{
+							minX: 0,
+							maxX: width,
+							minY: currentY + blockHeight,
+							maxY: currentY + blockHeight + footerHeight,
+							id:   key,
+						})
+						currentY += blockHeight + 1 + footerHeight
+					} else {
+						currentY += blockHeight
+					}
+				} else {
+					if sb.Len() > 0 {
+						sb.WriteString("\n")
+						currentY++
+					}
+					rendered := util.ToMarkdown(segment.Content, width, backgroundColor)
+					sb.WriteString(rendered)
+					currentY += lipgloss.Height(rendered)
+				}
+			}
+			content = sb.String()
+		} else {
+			content = util.ToMarkdown(text, width, backgroundColor)
+		}
+
 		if isThinking {
 			var label string
 			if shimmer {
@@ -459,22 +541,36 @@ func renderToolDetails(
 	toolCall opencode.ToolPart,
 	permission opencode.Permission,
 	width int,
-) string {
+	expanded map[string]bool,
+) toolRenderResult {
 	measure := util.Measure("chat.renderToolDetails")
 	defer measure("tool", toolCall.Tool)
+	res := toolRenderResult{}
+
 	ignoredTools := []string{"todoread"}
 	if slices.Contains(ignoredTools, toolCall.Tool) {
-		return ""
+		return res
 	}
+
+	key := ""
+	if toolCall.ID != "" {
+		key = fmt.Sprintf("tool-%s", toolCall.ID)
+	} else if toolCall.CallID != "" {
+		key = fmt.Sprintf("tool-%s", toolCall.CallID)
+	}
+	isExpanded := expanded[key]
 
 	if toolCall.State.Status == opencode.ToolPartStateStatusPending {
 		title := renderToolTitle(toolCall, width)
-		return renderContentBlock(app, title, width)
+		block := renderContentBlock(app, title, width)
+		res.content = block
+		res.height = lipgloss.Height(block)
+		return res
 	}
 
-	var result *string
+	var output *string
 	if toolCall.State.Output != "" {
-		result = &toolCall.State.Output
+		output = &toolCall.State.Output
 	}
 
 	toolInputMap := make(map[string]any)
@@ -497,6 +593,7 @@ func renderToolDetails(
 	defaultStyle := styles.NewStyle().Background(backgroundColor).Width(width - 6).Render
 	baseStyle := styles.NewStyle().Background(backgroundColor).Foreground(t.Text()).Render
 	mutedStyle := styles.NewStyle().Background(backgroundColor).Foreground(t.TextMuted()).Render
+	footerStyle := styles.NewStyle().Foreground(t.TextMuted()).Background(backgroundColor).Italic(true).Render
 
 	permissionContent := ""
 	if permission.ID != "" {
@@ -611,7 +708,9 @@ func renderToolDetails(
 						WithBorderColor(borderColor),
 						WithBorderBoth(permission.ID != ""),
 					)
-					return content
+					res.content = content
+					res.height = lipgloss.Height(content)
+					return res
 				}
 			}
 		case "write":
@@ -625,17 +724,27 @@ func renderToolDetails(
 			}
 		case "bash":
 			if command, ok := toolInputMap["command"].(string); ok {
-				body = fmt.Sprintf("```console\n$ %s\n", command)
-				output := metadata["output"]
-				if output != nil {
-					body += ansi.Strip(fmt.Sprintf("%s", output))
+				rawOutput := ""
+				if output := metadata["output"]; output != nil {
+					rawOutput = ansi.Strip(fmt.Sprintf("%s", output))
 				}
-				body += "```"
+				lines := strings.Split(rawOutput, "\n")
+				overflow := len(lines) > 10
+				displayOutput := rawOutput
+				if overflow && !isExpanded {
+					displayOutput = strings.Join(lines[:10], "\n") + "\n…"
+				}
+
+				body = fmt.Sprintf("```console\n$ %s\n%s\n```", command, displayOutput)
 				body = util.ToMarkdown(body, width, backgroundColor)
+				if overflow {
+					body += "\n" + footerStyle("Click to "+map[bool]string{true: "collapse", false: "expand"}[isExpanded])
+					res.zoneID = key
+				}
 			}
 		case "webfetch":
-			if format, ok := toolInputMap["format"].(string); ok && result != nil {
-				body = *result
+			if format, ok := toolInputMap["format"].(string); ok && output != nil {
+				body = *output
 				body = util.TruncateHeight(body, 10)
 				if format == "html" || format == "markdown" {
 					body = util.ToMarkdown(body, width, backgroundColor)
@@ -654,10 +763,8 @@ func renderToolDetails(
 					case "completed":
 						body += fmt.Sprintf("- [x] %s\n", content)
 					case "cancelled":
-						// strike through cancelled todo
 						body += fmt.Sprintf("- [ ] ~~%s~~\n", content)
 					case "in_progress":
-						// highlight in progress todo
 						body += fmt.Sprintf("- [ ] `%s`\n", content)
 					default:
 						body += fmt.Sprintf("- [ ] %s\n", content)
@@ -682,7 +789,6 @@ func renderToolDetails(
 
 				body += "\n\n"
 
-				// Build navigation hint with proper spacing
 				cycleKeybind := app.Keybind(commands.SessionChildCycleCommand)
 				cycleReverseKeybind := app.Keybind(commands.SessionChildCycleReverseCommand)
 
@@ -700,27 +806,27 @@ func renderToolDetails(
 			}
 			body = defaultStyle(body)
 		default:
-			if result == nil {
+			if output == nil {
 				empty := ""
-				result = &empty
+				output = &empty
 			}
-			body = *result
+			body = *output
 			body = util.TruncateHeight(body, 10)
 			body = defaultStyle(body)
 		}
 	}
 
-	error := ""
+	errMsg := ""
 	if toolCall.State.Status == opencode.ToolPartStateStatusError {
-		error = toolCall.State.Error
+		errMsg = toolCall.State.Error
 	}
 
-	if error != "" {
+	if errMsg != "" {
 		errorContent := styles.NewStyle().
 			Width(width - 6).
 			Foreground(t.Error()).
 			Background(backgroundColor).
-			Render(error)
+			Render(errMsg)
 
 		if body == "" {
 			body = errorContent
@@ -729,8 +835,8 @@ func renderToolDetails(
 		}
 	}
 
-	if body == "" && error == "" && result != nil {
-		body = *result
+	if body == "" && errMsg == "" && output != nil {
+		body = *output
 		body = util.TruncateHeight(body, 10)
 		body = defaultStyle(body)
 	}
@@ -746,13 +852,15 @@ func renderToolDetails(
 		content += "\n\n\n" + permissionContent
 	}
 
-	return renderContentBlock(
+	res.content = renderContentBlock(
 		app,
 		content,
 		width,
 		WithBorderColor(borderColor),
 		WithBorderBoth(permission.ID != ""),
 	)
+	res.height = lipgloss.Height(res.content)
+	return res
 }
 
 func renderToolName(name string) string {

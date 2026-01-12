@@ -282,6 +282,22 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Suspend
 		}
 
+	case tea.MouseMsg:
+		if a.modal != nil {
+			// If modal is active, it likely doesn't support mouse events yet or handles them internally?
+			// Ideally forward to modal if it supports it, but for now focus on chat page.
+			// Actually modala usually float on top.
+		} else {
+			// Forward to chat page
+			// We need to create a wrapper message or directly access the component?
+			// Chat page has an Update method.
+			// Let's forward it.
+			updatedPage, cmd := a.chatPage.Update(msg)
+			a.chatPage = updatedPage.(*chatpage.Page)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
 	case tea.MouseWheelMsg:
 		if a.modal != nil {
 			u, cmd := a.modal.Update(msg)

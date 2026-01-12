@@ -61,6 +61,14 @@ type messagesComponent struct {
 	selection          *selection
 	messagePositions   map[string]int // map message ID to line position
 	animating          bool
+	expandedCodeBlocks map[string]bool
+	interactiveZones   []InteractiveZone
+	expandVersion      int
+}
+
+type InteractiveZone struct {
+	minX, maxX, minY, maxY int
+	id                     string
 }
 
 type selection struct {
@@ -104,10 +112,16 @@ type ToggleThinkingBlocksMsg struct{}
 type shimmerTickMsg struct{}
 
 func (m *messagesComponent) Init() tea.Cmd {
+	if m.expandedCodeBlocks == nil {
+		m.expandedCodeBlocks = make(map[string]bool)
+	}
 	return tea.Batch(m.viewport.Init())
 }
 
 func (m *messagesComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.expandedCodeBlocks == nil {
+		m.expandedCodeBlocks = make(map[string]bool)
+	}
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case shimmerTickMsg:
@@ -120,7 +134,24 @@ func (m *messagesComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.Tick(90*time.Millisecond, func(t time.Time) tea.Msg { return shimmerTickMsg{} }),
 		)
 	case tea.MouseClickMsg:
-		slog.Info("mouse", "x", msg.X, "y", msg.Y, "offset", m.viewport.YOffset)
+		// First handle interactive zones (expand/collapse)
+		headerHeight := lipgloss.Height(m.header)
+		absoluteY := (msg.Y - headerHeight) + m.viewport.YOffset
+		for _, zone := range m.interactiveZones {
+			if msg.X >= zone.minX && msg.X <= zone.maxX && absoluteY >= zone.minY && absoluteY <= zone.maxY {
+				if zone.id != "" {
+					if m.expandedCodeBlocks[zone.id] {
+						delete(m.expandedCodeBlocks, zone.id)
+					} else {
+						m.expandedCodeBlocks[zone.id] = true
+					}
+					m.expandVersion++
+					return m, m.renderView()
+				}
+			}
+		}
+
+		// Otherwise start selection
 		y := msg.Y + m.viewport.YOffset
 		if y > 0 {
 			m.selection = &selection{
@@ -129,11 +160,8 @@ func (m *messagesComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				endY:   -1,
 				endX:   -1,
 			}
-
-			slog.Info("mouse selection", "start", fmt.Sprintf("%d,%d", m.selection.startX, m.selection.startY), "end", fmt.Sprintf("%d,%d", m.selection.endX, m.selection.endY))
 			return m, m.renderView()
 		}
-
 	case tea.MouseMotionMsg:
 		if m.selection != nil {
 			m.selection = &selection{
@@ -269,6 +297,7 @@ func (m *messagesComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clipboard = msg.clipboard
 		m.loading = false
 		m.messagePositions = msg.messagePositions
+		m.interactiveZones = msg.interactiveZones
 		m.tail = m.viewport.AtBottom()
 
 		// Preserve scroll across reflow
@@ -309,6 +338,7 @@ type renderCompleteMsg struct {
 	partCount        int
 	lineCount        int
 	messagePositions map[string]int
+	interactiveZones []InteractiveZone
 }
 
 func (m *messagesComponent) renderView() tea.Cmd {
@@ -339,6 +369,7 @@ func (m *messagesComponent) renderView() tea.Cmd {
 		blocks := make([]string, 0)
 		partCount := 0
 		lineCount := 0
+		interactiveZones := make([]InteractiveZone, 0)
 		messagePositions := make(map[string]int) // Track message ID to line position
 
 		orphanedToolCalls := make([]opencode.ToolPart, 0)
@@ -455,7 +486,7 @@ func (m *messagesComponent) renderView() tea.Cmd {
 
 						author := m.app.Config.Username
 						isQueued := casted.ID > lastAssistantMessage
-						key := m.cache.GenerateKey(casted.ID, part.Text, width, files, author, isQueued)
+						key := m.cache.GenerateKey(casted.ID, part.Text, width, files, author, isQueued, m.expandVersion)
 						content, cached = m.cache.Get(key)
 						if !cached {
 							content = renderText(
@@ -471,6 +502,9 @@ func (m *messagesComponent) renderView() tea.Cmd {
 								false,
 								fileParts,
 								agentParts,
+								m.expandedCodeBlocks,
+								&interactiveZones,
+								lineCount,
 							)
 							m.cache.Set(key, content)
 						}
@@ -532,7 +566,7 @@ func (m *messagesComponent) renderView() tea.Cmd {
 						}
 
 						if finished {
-							key := m.cache.GenerateKey(casted.ID, part.Text, width, m.showToolDetails, toolCallParts)
+							key := m.cache.GenerateKey(casted.ID, part.Text, width, m.showToolDetails, toolCallParts, m.expandVersion)
 							content, cached = m.cache.Get(key)
 							if !cached {
 								content = renderText(
@@ -548,6 +582,9 @@ func (m *messagesComponent) renderView() tea.Cmd {
 									false,
 									[]opencode.FilePart{},
 									[]opencode.AgentPart{},
+									m.expandedCodeBlocks,
+									&interactiveZones,
+									lineCount,
 									toolCallParts...,
 								)
 								m.cache.Set(key, content)
@@ -566,6 +603,9 @@ func (m *messagesComponent) renderView() tea.Cmd {
 								false,
 								[]opencode.FilePart{},
 								[]opencode.AgentPart{},
+								m.expandedCodeBlocks,
+								&interactiveZones,
+								lineCount,
 								toolCallParts...,
 							)
 						}
@@ -593,35 +633,60 @@ func (m *messagesComponent) renderView() tea.Cmd {
 							continue
 						}
 
+						var res toolRenderResult
 						if part.State.Status == opencode.ToolPartStateStatusCompleted || part.State.Status == opencode.ToolPartStateStatusError {
 							key := m.cache.GenerateKey(casted.ID,
 								part.ID,
 								m.showToolDetails,
 								width,
 								permission.ID,
+								m.expandVersion,
 							)
 							content, cached = m.cache.Get(key)
-							if !cached {
-								content = renderToolDetails(
-									m.app,
-									part,
-									permission,
-									width,
-								)
-								m.cache.Set(key, content)
-							}
-						} else {
-							// if the tool call isn't finished, don't cache
-							content = renderToolDetails(
+							res = renderToolDetails(
 								m.app,
 								part,
 								permission,
 								width,
+								m.expandedCodeBlocks,
 							)
+							if cached {
+								// trust cached visual, reuse computed height/zone
+								res.content = content
+								if res.height == 0 {
+									res.height = lipgloss.Height(content)
+								}
+							} else {
+								content = res.content
+								m.cache.Set(key, content)
+							}
+						} else {
+							// if the tool call isn't finished, don't cache
+							res = renderToolDetails(
+								m.app,
+								part,
+								permission,
+								width,
+								m.expandedCodeBlocks,
+							)
+							content = res.content
+						}
+						if res.zoneID != "" {
+							interactiveZones = append(interactiveZones, InteractiveZone{
+								minX: 0,
+								maxX: width,
+								minY: lineCount,
+								maxY: lineCount + res.height,
+								id:   res.zoneID,
+							})
 						}
 						if content != "" {
 							partCount++
-							lineCount += lipgloss.Height(content) + 1
+							height := res.height
+							if height == 0 {
+								height = lipgloss.Height(content)
+							}
+							lineCount += height + 1
 							blocks = append(blocks, content)
 							hasContent = true
 						}
@@ -648,6 +713,9 @@ func (m *messagesComponent) renderView() tea.Cmd {
 								shimmer,
 								[]opencode.FilePart{},
 								[]opencode.AgentPart{},
+								nil,
+								nil,
+								0,
 							)
 							partCount++
 							lineCount += lipgloss.Height(content) + 1
@@ -685,6 +753,9 @@ func (m *messagesComponent) renderView() tea.Cmd {
 						false,
 						[]opencode.FilePart{},
 						[]opencode.AgentPart{},
+						nil,
+						nil,
+						0,
 					)
 					partCount++
 					lineCount += lipgloss.Height(content) + 1
@@ -787,15 +858,30 @@ func (m *messagesComponent) renderView() tea.Cmd {
 				for _, part := range response.Parts {
 					if part.CallID == m.app.CurrentPermission.CallID {
 						if toolPart, ok := part.AsUnion().(opencode.ToolPart); ok {
-							content := renderToolDetails(
+							res := renderToolDetails(
 								m.app,
 								toolPart,
 								m.app.CurrentPermission,
 								width,
+								m.expandedCodeBlocks,
 							)
+							content := res.content
+							if res.zoneID != "" {
+								interactiveZones = append(interactiveZones, InteractiveZone{
+									minX: 0,
+									maxX: width,
+									minY: lineCount,
+									maxY: lineCount + res.height,
+									id:   res.zoneID,
+								})
+							}
 							if content != "" {
 								partCount++
-								lineCount += lipgloss.Height(content) + 1
+								height := res.height
+								if height == 0 {
+									height = lipgloss.Height(content)
+								}
+								lineCount += height + 1
 								blocks = append(blocks, content)
 							}
 						}
@@ -863,6 +949,7 @@ func (m *messagesComponent) renderView() tea.Cmd {
 			partCount:        partCount,
 			lineCount:        lineCount,
 			messagePositions: messagePositions,
+			interactiveZones: interactiveZones,
 		}
 	}
 }
