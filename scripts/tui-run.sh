@@ -78,7 +78,8 @@ SERVER_PID=$!
 echo "Waiting for server to start..."
 MAX_RETRIES=30
 for ((i=1; i<=MAX_RETRIES; i++)); do
-    if curl -s "http://127.0.0.1:$PORT/api/health" >/dev/null; then
+    # Use -f to fail on 404, and check /global/health which is a known endpoint
+    if curl -s -f "http://127.0.0.1:$PORT/global/health" >/dev/null; then
         echo "✅ Server is up!"
         break
     fi
