@@ -103,7 +103,6 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		keyString := msg.String()
-		slog.Info("[KEY_DEBUG]", "key", keyString, "text", msg.Text, "bytes", []byte(msg.Text))
 		slog.Debug("[TUI/KeyPress]", "key", keyString)
 
 		if a.app.CurrentPermission.ID != "" {
@@ -337,16 +336,11 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slog.Debug("[TUI/Commands] Matching", "key", keyString, "leader", a.app.IsLeaderSequence)
 		matches := a.app.Commands.Matches(msg, a.app.IsLeaderSequence)
 
-		// DEBUG: Log matches
-		if len(matches) > 0 {
-			slog.Info("[CMD_MATCH]", "key", keyString, "count", len(matches), "first", matches[0].Name)
-		} else {
-			slog.Info("[CMD_MATCH]", "key", keyString, "count", 0)
-
+		if len(matches) == 0 {
 			// Fallback: If "enter" matches nothing, force InputSubmitCommand
 			// This handles cases where the binding is mysteriously missing or overwritten
 			if keyString == "enter" {
-				slog.Info("[FALLBACK] Forcing InputSubmitCommand for 'enter'") // Keep this log for now
+				slog.Warn("[FALLBACK] Forcing InputSubmitCommand for 'enter' (binding mismatch)")
 				cmd := a.app.Commands[commands.InputSubmitCommand]
 				if cmd.Name == "" {
 					cmd = commands.Command{Name: commands.InputSubmitCommand}
@@ -1539,11 +1533,10 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 		a.editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
 	case commands.InputSubmitCommand:
-		fmt.Fprintf(os.Stderr, "[DEBUG] InputSubmitCommand triggered!\n")
 		slog.Info("[InputSubmitCommand] Calling editor.Submit()")
 		updated, cmd := a.editor.Submit()
 		a.editor = updated.(chat.EditorComponent)
-		fmt.Fprintf(os.Stderr, "[DEBUG] editor.Submit() returned\n")
+
 		cmds = append(cmds, cmd)
 	case commands.InputNewlineCommand:
 		updated, cmd := a.editor.Newline()

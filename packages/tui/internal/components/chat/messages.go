@@ -322,6 +322,11 @@ func (m *messagesComponent) renderView() tea.Cmd {
 	m.dirty = false
 	m.rendering = true
 
+	if m.width <= 0 {
+		m.rendering = false
+		return func() tea.Msg { return nil }
+	}
+
 	viewport := m.viewport
 	tail := m.tail
 
@@ -1305,7 +1310,7 @@ func NewMessagesComponent(app *app.App) MessagesComponent {
 		showToolDetails = *app.State.ShowToolDetails
 	}
 
-	showThinkingBlocks := false
+	showThinkingBlocks := true
 	if app.State.ShowThinkingBlocks != nil {
 		showThinkingBlocks = *app.State.ShowThinkingBlocks
 	}

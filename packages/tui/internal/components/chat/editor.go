@@ -435,16 +435,7 @@ func (m *editorComponent) View() string {
 		width = min(width, 80)
 	}
 
-	if m.Lines() > 1 {
-		return lipgloss.Place(
-			width,
-			5,
-			lipgloss.Center,
-			lipgloss.Center,
-			"",
-			styles.WhitespaceStyle(theme.CurrentTheme().Background()),
-		)
-	}
+	// Removed broken logic that hid content when Lines > 1
 	return m.Content()
 }
 

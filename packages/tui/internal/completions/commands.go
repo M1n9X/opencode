@@ -35,7 +35,7 @@ func (c *CommandCompletionProvider) getCommandCompletionItem(
 	displayFunc := func(s styles.Style) string {
 		t := theme.CurrentTheme()
 		spacer := strings.Repeat(" ", space)
-		display := "  /" + cmd.PrimaryTrigger() + s.
+		display := "/" + cmd.PrimaryTrigger() + s.
 			Foreground(t.TextMuted()).
 			Render(spacer+cmd.Description)
 		return display

@@ -97,9 +97,10 @@ func (cg *filesContextGroup) GetChildEntries(
 		}
 		if !exists {
 			displayFunc := func(s styles.Style) string {
-				// t := theme.CurrentTheme()
-				// return s.Foreground(t.Text()).Render(file)
-				return s.Render(file)
+				// Hack: Strip "p" prefix if it's an artifact
+				clean := strings.TrimPrefix(file, "p")
+				icon := getFileIcon(clean)
+				return s.Render(icon + " " + clean)
 			}
 
 			item := CompletionSuggestion{
@@ -113,6 +114,37 @@ func (cg *filesContextGroup) GetChildEntries(
 	}
 
 	return items, nil
+}
+
+func getFileIcon(path string) string {
+	if strings.HasSuffix(path, "/") {
+		return "📁"
+	}
+	parts := strings.Split(path, ".")
+	if len(parts) > 1 {
+		ext := parts[len(parts)-1]
+		switch strings.ToLower(ext) {
+		case "go":
+			return "🐹"
+		case "ts", "tsx", "js", "jsx":
+			return "⚡"
+		case "md":
+			return "📝"
+		case "json", "yaml", "yml", "toml":
+			return "⚙️"
+		case "css", "scss", "html":
+			return "🎨"
+		case "png", "jpg", "jpeg", "svg", "gif":
+			return "🖼️"
+		case "sh", "bash", "zsh":
+			return "🐚"
+		case "dockerfile":
+			return "🐳"
+		case "gitignore", "dockerignore":
+			return "👁️"
+		}
+	}
+	return "📄"
 }
 
 func NewFileContextGroup(app *app.App) CompletionProvider {
