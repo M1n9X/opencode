@@ -1,6 +1,7 @@
 package status
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss/v2/compat"
 	"github.com/fsnotify/fsnotify"
+	"github.com/sst/opencode-sdk-go"
 	"github.com/sst/opencode/internal/app"
 	"github.com/sst/opencode/internal/commands"
 	"github.com/sst/opencode/internal/layout"
@@ -158,13 +160,50 @@ func (m *statusComponent) View() string {
 	agent = faintStyle.Render(key+" ") + agent
 	modeWidth := lipgloss.Width(agent)
 
-	availableWidth := m.width - logoWidth - modeWidth
+	// Build right side info (model, tokens, busy indicator)
+	var rightInfo []string
+
+	// Add busy indicator if app is busy
+	if m.app.IsBusy() {
+		busyIndicator := styles.NewStyle().
+			Foreground(t.Primary()).
+			Background(t.BackgroundPanel()).
+			Render("⋯")
+		rightInfo = append(rightInfo, busyIndicator)
+	}
+
+	// Add token usage if available
+	tokenInfo := m.getTokenInfo()
+	if tokenInfo != "" {
+		rightInfo = append(rightInfo, faintStyle.Render(tokenInfo))
+	}
+
+	// Add model info if available
+	modelInfo := m.getModelInfo()
+	if modelInfo != "" {
+		modelStyle := styles.NewStyle().
+			Foreground(t.Text()).
+			Background(t.BackgroundPanel())
+		rightInfo = append(rightInfo, modelStyle.Render(modelInfo))
+	}
+
+	rightInfoStr := strings.Join(rightInfo, faintStyle.Render(" · "))
+	rightInfoWidth := lipgloss.Width(rightInfoStr)
+
+	availableWidth := m.width - logoWidth - modeWidth - rightInfoWidth
+	if rightInfoWidth > 0 {
+		availableWidth -= 2 // spacing
+	}
+
 	branchSuffix := ""
 	if m.branch != "" {
 		branchSuffix = ":" + m.branch
 	}
 
 	maxCwdWidth := availableWidth - lipgloss.Width(branchSuffix)
+	if maxCwdWidth < 10 {
+		maxCwdWidth = 10
+	}
 	cwdDisplay := m.collapsePath(m.cwd, maxCwdWidth)
 
 	if m.branch != "" && availableWidth > lipgloss.Width(cwdDisplay)+lipgloss.Width(branchSuffix) {
@@ -177,6 +216,12 @@ func (m *statusComponent) View() string {
 		Padding(0, 1).
 		Render(cwdDisplay)
 
+	// Build middle section
+	middleView := logo + cwd
+	if rightInfoStr != "" {
+		middleView += "  " + rightInfoStr
+	}
+
 	background := t.BackgroundPanel()
 	status := layout.Render(
 		layout.FlexOptions{
@@ -187,7 +232,7 @@ func (m *statusComponent) View() string {
 			Width:      m.width,
 		},
 		layout.FlexItem{
-			View: logo + cwd,
+			View: middleView,
 		},
 		layout.FlexItem{
 			View: agent,
@@ -196,6 +241,50 @@ func (m *statusComponent) View() string {
 
 	blank := styles.NewStyle().Background(t.Background()).Width(m.width).Render("")
 	return blank + "\n" + status
+}
+
+func (m *statusComponent) getModelInfo() string {
+	if m.app.Model == nil {
+		return ""
+	}
+	// Use model name if available, otherwise use model ID
+	if m.app.Model.Name != "" {
+		return m.app.Model.Name
+	}
+	return m.app.Model.ID
+}
+
+func (m *statusComponent) getTokenInfo() string {
+	if len(m.app.Messages) == 0 {
+		return ""
+	}
+
+	// Find the last assistant message with token info
+	for i := len(m.app.Messages) - 1; i >= 0; i-- {
+		msg := m.app.Messages[i]
+		if assistantMsg, ok := msg.Info.(opencode.AssistantMessage); ok {
+			if assistantMsg.Tokens.Output > 0 {
+				total := assistantMsg.Tokens.Input + assistantMsg.Tokens.Output +
+					assistantMsg.Tokens.Reasoning + assistantMsg.Tokens.Cache.Read +
+					assistantMsg.Tokens.Cache.Write
+
+				// Format with thousands separator
+				return formatTokenCount(total)
+			}
+		}
+	}
+
+	return ""
+}
+
+func formatTokenCount(count float64) string {
+	if count < 1000 {
+		return fmt.Sprintf("%.0f", count)
+	}
+	if count < 1000000 {
+		return fmt.Sprintf("%.1fk", count/1000)
+	}
+	return fmt.Sprintf("%.1fm", count/1000000)
 }
 
 func (m *statusComponent) startGitWatcher() tea.Cmd {

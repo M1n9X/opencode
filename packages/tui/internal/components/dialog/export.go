@@ -331,7 +331,7 @@ func formatAssistantHeader(msg opencode.AssistantMessage, includeMetadata bool) 
 		duration = fmt.Sprintf(" · %.1fs", d)
 	}
 
-	mode := strings.Title(msg.Mode)
+	mode := titleCase(msg.Mode)
 	return fmt.Sprintf("## Assistant (%s · %s%s)\n\n", mode, msg.ModelID, duration)
 }
 
@@ -373,4 +373,12 @@ func formatPart(part opencode.PartUnion, options TranscriptOptions) string {
 	}
 
 	return sb.String()
+}
+
+// titleCase capitalizes the first letter of a string
+func titleCase(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

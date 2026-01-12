@@ -743,6 +743,9 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/tui/open-mcp":
 			mcpDialog := dialog.NewMcpDialog(a.app)
 			a.modal = mcpDialog
+		case "/tui/open-status":
+			statusDialog := dialog.NewStatusDialog(a.app)
+			a.modal = statusDialog
 		case "/tui/append-prompt":
 			var body struct {
 				Text string `json:"text"`
@@ -874,6 +877,9 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 	case commands.AppHelpCommand:
 		helpDialog := dialog.NewHelpDialog(a.app)
 		a.modal = helpDialog
+	case commands.AppStatusCommand:
+		statusDialog := dialog.NewStatusDialog(a.app)
+		a.modal = statusDialog
 	case commands.AgentCycleCommand:
 		updated, cmd := a.app.SwitchAgent()
 		a.app = updated

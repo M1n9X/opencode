@@ -237,7 +237,10 @@ func (a *agentDialog) setupAllAgents() {
 		isCurrent := agent.Name == currentAgentName
 
 		// Create display name (capitalize first letter)
-		displayName := strings.Title(agent.Name)
+		displayName := agent.Name
+		if len(displayName) > 0 {
+			displayName = strings.ToUpper(displayName[:1]) + displayName[1:]
+		}
 
 		a.allAgents = append(a.allAgents, agentSelectItem{
 			name:        agent.Name,

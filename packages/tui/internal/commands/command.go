@@ -163,6 +163,7 @@ const (
 	MessagesUndoCommand             CommandName = "messages_undo"
 	MessagesRedoCommand             CommandName = "messages_redo"
 	AppExitCommand                  CommandName = "app_exit"
+	AppStatusCommand                CommandName = "app_status"
 )
 
 func (k Command) Matches(msg tea.KeyPressMsg, leader bool) bool {
@@ -200,6 +201,12 @@ func LoadFromConfig(config *opencode.Config, customCommands []opencode.Command) 
 			Description: "show help",
 			Keybindings: parseBindings("<leader>h"),
 			Trigger:     []string{"help"},
+		},
+		{
+			Name:        AppStatusCommand,
+			Description: "show status",
+			Keybindings: parseBindings("<leader>S"),
+			Trigger:     []string{"status"},
 		},
 		{
 			Name:        EditorOpenCommand,

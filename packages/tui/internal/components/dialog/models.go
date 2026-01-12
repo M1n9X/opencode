@@ -13,6 +13,7 @@ import (
 	"github.com/sst/opencode/internal/app"
 	"github.com/sst/opencode/internal/components/list"
 	"github.com/sst/opencode/internal/components/modal"
+	"github.com/sst/opencode/internal/components/toast"
 	"github.com/sst/opencode/internal/layout"
 	"github.com/sst/opencode/internal/styles"
 	"github.com/sst/opencode/internal/theme"
@@ -48,7 +49,8 @@ type ModelWithProvider struct {
 
 // modelItem is a custom list item for model selections
 type modelItem struct {
-	model ModelWithProvider
+	model      ModelWithProvider
+	isFavorite bool
 }
 
 func (m modelItem) Render(
@@ -70,7 +72,13 @@ func (m modelItem) Render(
 		Foreground(t.TextMuted()).
 		Background(t.BackgroundPanel())
 
-	modelPart := itemStyle.Render(m.model.Model.Name)
+	// Add star for favorites
+	prefix := ""
+	if m.isFavorite {
+		prefix = "★ "
+	}
+
+	modelPart := itemStyle.Render(prefix + m.model.Model.Name)
 	providerPart := providerStyle.Render(fmt.Sprintf(" %s", m.model.Provider.Name))
 
 	combinedText := modelPart + providerPart
@@ -133,6 +141,27 @@ func (m *modelDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case tea.KeyPressMsg:
+		// Handle ctrl+f to toggle favorite
+		if msg.String() == "ctrl+f" {
+			if selectedItem, idx := m.searchDialog.list.GetSelectedItem(); selectedItem != nil {
+				if item, ok := selectedItem.(modelItem); ok {
+					isFavorite := m.app.State.ToggleFavoriteModel(item.model.Provider.ID, item.model.Model.ID)
+					items := m.buildDisplayList(m.searchDialog.GetQuery())
+					m.searchDialog.SetItems(items)
+					m.searchDialog.list.SetSelectedIndex(idx) // Maintain selection
+
+					var toastMsg tea.Cmd
+					if isFavorite {
+						toastMsg = toast.NewSuccessToast("Added to favorites")
+					} else {
+						toastMsg = toast.NewInfoToast("Removed from favorites")
+					}
+					return m, tea.Batch(m.app.SaveState(), toastMsg)
+				}
+			}
+		}
 
 	case SearchQueryChangedMsg:
 		// Update the list based on search query
@@ -309,22 +338,33 @@ func (m *modelDialog) buildSearchResults(query string) []list.Item {
 			continue
 		}
 		seenModels[key] = true
-		items = append(items, modelItem{model: model})
+		isFav := m.app.State.IsFavoriteModel(model.Provider.ID, model.Model.ID)
+		items = append(items, modelItem{model: model, isFavorite: isFav})
 	}
 
 	return items
 }
 
-// buildGroupedResults creates a grouped list with Recent section and provider groups
+// buildGroupedResults creates a grouped list with Favorites, Recent section and provider groups
 func (m *modelDialog) buildGroupedResults() []list.Item {
 	var items []list.Item
+
+	// Add Favorites section
+	favoriteModels := m.getFavoriteModels()
+	if len(favoriteModels) > 0 {
+		items = append(items, list.HeaderItem("Favorites"))
+		for _, model := range favoriteModels {
+			items = append(items, modelItem{model: model, isFavorite: true})
+		}
+	}
 
 	// Add Recent section
 	recentModels := m.getRecentModels(maxRecentModels)
 	if len(recentModels) > 0 {
 		items = append(items, list.HeaderItem("Recent"))
 		for _, model := range recentModels {
-			items = append(items, modelItem{model: model})
+			isFav := m.app.State.IsFavoriteModel(model.Provider.ID, model.Model.ID)
+			items = append(items, modelItem{model: model, isFavorite: isFav})
 		}
 	}
 
@@ -382,11 +422,30 @@ func (m *modelDialog) buildGroupedResults() []list.Item {
 
 		// Add models in this provider group
 		for _, model := range models {
-			items = append(items, modelItem{model: model})
+			isFav := m.app.State.IsFavoriteModel(model.Provider.ID, model.Model.ID)
+			items = append(items, modelItem{model: model, isFavorite: isFav})
 		}
 	}
 
 	return items
+}
+
+// getFavoriteModels returns the favorite models
+func (m *modelDialog) getFavoriteModels() []ModelWithProvider {
+	var favoriteModels []ModelWithProvider
+
+	// Get favorite models from app state
+	for _, fav := range m.app.State.FavoriteModels {
+		// Find the corresponding model
+		for _, model := range m.allModels {
+			if model.Provider.ID == fav.ProviderID && model.Model.ID == fav.ModelID {
+				favoriteModels = append(favoriteModels, model)
+				break
+			}
+		}
+	}
+
+	return favoriteModels
 }
 
 // getRecentModels returns the most recently used models

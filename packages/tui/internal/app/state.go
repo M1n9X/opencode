@@ -34,10 +34,12 @@ type State struct {
 	Agent              string                `toml:"agent"`
 	RecentlyUsedModels []ModelUsage          `toml:"recently_used_models"`
 	RecentlyUsedAgents []AgentUsage          `toml:"recently_used_agents"`
+	FavoriteModels     []ModelUsage          `toml:"favorite_models"`
 	MessageHistory     []Prompt              `toml:"message_history"`
 	PromptStash        []StashEntry          `toml:"prompt_stash"`
 	ShowToolDetails    *bool                 `toml:"show_tool_details"`
 	ShowThinkingBlocks *bool                 `toml:"show_thinking_blocks"`
+	TipsVisible        *bool                 `toml:"tips_visible"`
 }
 
 type StashEntry struct {
@@ -46,14 +48,17 @@ type StashEntry struct {
 }
 
 func NewState() *State {
+	trueVal := true
 	return &State{
 		Theme:              "opencode",
 		Agent:              "build",
 		AgentModel:         make(map[string]AgentModel),
 		RecentlyUsedModels: make([]ModelUsage, 0),
 		RecentlyUsedAgents: make([]AgentUsage, 0),
+		FavoriteModels:     make([]ModelUsage, 0),
 		MessageHistory:     make([]Prompt, 0),
 		PromptStash:        make([]StashEntry, 0),
+		TipsVisible:        &trueVal,
 	}
 }
 
@@ -194,4 +199,35 @@ func LoadState(filePath string) (*State, error) {
 	}
 
 	return &state, nil
+}
+
+// ToggleFavoriteModel adds or removes a model from favorites
+func (s *State) ToggleFavoriteModel(providerID, modelID string) bool {
+	// Check if already in favorites
+	for i, fav := range s.FavoriteModels {
+		if fav.ProviderID == providerID && fav.ModelID == modelID {
+			// Remove from favorites
+			s.FavoriteModels = append(s.FavoriteModels[:i], s.FavoriteModels[i+1:]...)
+			return false
+		}
+	}
+
+	// Add to favorites
+	newFav := ModelUsage{
+		ProviderID: providerID,
+		ModelID:    modelID,
+		LastUsed:   time.Now(),
+	}
+	s.FavoriteModels = append(s.FavoriteModels, newFav)
+	return true
+}
+
+// IsFavoriteModel checks if a model is in favorites
+func (s *State) IsFavoriteModel(providerID, modelID string) bool {
+	for _, fav := range s.FavoriteModels {
+		if fav.ProviderID == providerID && fav.ModelID == modelID {
+			return true
+		}
+	}
+	return false
 }
