@@ -90,7 +90,8 @@ type SendCommand = struct {
 	Args    string
 }
 type SetEditorContentMsg struct {
-	Text string
+	Text   string
+	Append bool
 }
 type FileRenderedMsg struct {
 	FilePath string

@@ -25,6 +25,7 @@ type Page struct {
 	Editor      chatcomp.EditorComponent
 	Messages    chatcomp.MessagesComponent
 	Completions dialog.CompletionDialog
+	DidYouKnow  *dialog.DidYouKnow
 
 	// Providers
 	CommandProvider completions.CompletionProvider
@@ -43,6 +44,7 @@ func New(app *app.App) *Page {
 		Editor:      chatcomp.NewEditorComponent(app),
 		Messages:    chatcomp.NewMessagesComponent(app),
 		Completions: dialog.NewCompletionDialogComponent("", nil),
+		DidYouKnow:  dialog.NewDidYouKnow(app),
 	}
 
 	// Initialize providers
@@ -324,6 +326,20 @@ func (p *Page) calculateHomeLayout() (string, int, int) {
 	lines = append(lines, "")
 	lines = append(lines, logoAndVersion)
 	lines = append(lines, "")
+	// DidYouKnow
+	if p.DidYouKnow != nil {
+		tips := p.DidYouKnow.View()
+		if tips != "" {
+			tips = lipgloss.PlaceHorizontal(
+				effectiveWidth,
+				lipgloss.Right,
+				tips,
+				styles.WhitespaceStyle(t.Background()),
+			)
+			lines = append(lines, tips)
+		}
+	}
+
 	lines = append(lines, cmds)
 	lines = append(lines, "")
 	lines = append(lines, "")

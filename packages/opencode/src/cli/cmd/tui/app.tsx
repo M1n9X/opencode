@@ -37,6 +37,12 @@ import open from "open"
 import { writeHeapSnapshot } from "v8"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 
+const TERMINAL_TITLE_MAX_CHARS = 40
+const TOAST_DURATION_SHORT = 3000
+const TOAST_DURATION_MEDIUM = 5000
+const TOAST_DURATION_LONG = 10000
+const TERMINAL_COLOR_QUERY_TIMEOUT = 1000
+
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
   if (!process.stdin.isTTY) return "dark"
@@ -93,7 +99,7 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
     timeout = setTimeout(() => {
       cleanup()
       resolve("dark")
-    }, 1000)
+    }, TERMINAL_COLOR_QUERY_TIMEOUT)
   })
 }
 
@@ -212,10 +218,6 @@ function App() {
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
 
-  createEffect(() => {
-    console.log(JSON.stringify(route.data))
-  })
-
   // Update terminal window title based on current route and session
   createEffect(() => {
     if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
@@ -232,8 +234,10 @@ function App() {
         return
       }
 
-      // Truncate title to 40 chars max
-      const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
+      const title =
+        session.title.length > TERMINAL_TITLE_MAX_CHARS
+          ? session.title.slice(0, TERMINAL_TITLE_MAX_CHARS - 3) + "..."
+          : session.title
       renderer.setTerminalTitle(`OC | ${title}`)
     }
   })
@@ -248,7 +252,7 @@ function App() {
           return toast.show({
             variant: "warning",
             message: `Invalid model format: ${args.model}`,
-            duration: 3000,
+            duration: TOAST_DURATION_SHORT,
           })
         local.model.set({ providerID, modelID }, { recent: true })
       }
@@ -263,7 +267,6 @@ function App() {
 
   let continued = false
   createEffect(() => {
-    // When using -c, session list is loaded in blocking phase, so we can navigate at "partial"
     if (continued || sync.status === "loading" || !args.continue) return
     const match = sync.data.session
       .toSorted((a, b) => b.time.updated - a.time.updated)
@@ -278,7 +281,6 @@ function App() {
     on(
       () => sync.status === "complete" && sync.data.provider.length === 0,
       (isEmpty, wasEmpty) => {
-        // only trigger when we transition into an empty-provider state
         if (!isEmpty || wasEmpty) return
         dialog.replace(() => <DialogProviderList />)
       },
@@ -503,7 +505,7 @@ function App() {
         toast.show({
           variant: "info",
           message: `Heap snapshot written to ${path}`,
-          duration: 5000,
+          duration: TOAST_DURATION_MEDIUM,
         })
         dialog.clear()
       },
@@ -602,7 +604,7 @@ function App() {
     toast.show({
       variant: "error",
       message,
-      duration: 5000,
+      duration: TOAST_DURATION_MEDIUM,
     })
   })
 
@@ -611,7 +613,7 @@ function App() {
       variant: "success",
       title: "Update Complete",
       message: `OpenCode updated to v${evt.properties.version}`,
-      duration: 5000,
+      duration: TOAST_DURATION_MEDIUM,
     })
   })
 
@@ -620,7 +622,7 @@ function App() {
       variant: "info",
       title: "Update Available",
       message: `OpenCode v${evt.properties.version} is available. Run 'opencode upgrade' to update manually.`,
-      duration: 10000,
+      duration: TOAST_DURATION_LONG,
     })
   })
 

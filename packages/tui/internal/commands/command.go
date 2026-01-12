@@ -136,9 +136,12 @@ const (
 	ThinkingBlocksCommand           CommandName = "thinking_blocks"
 	ModelListCommand                CommandName = "model_list"
 	AgentListCommand                CommandName = "agent_list"
+	McpListCommand                  CommandName = "mcp_list"
+	StashListCommand                CommandName = "stash_list"
+	FileListCommand                 CommandName = "file_list"
+	ExportCommand                   CommandName = "export"
 	ModelCycleRecentCommand         CommandName = "model_cycle_recent"
 	ThemeListCommand                CommandName = "theme_list"
-	FileListCommand                 CommandName = "file_list"
 	FileCloseCommand                CommandName = "file_close"
 	FileSearchCommand               CommandName = "file_search"
 	FileDiffToggleCommand           CommandName = "file_diff_toggle"
@@ -303,6 +306,26 @@ func LoadFromConfig(config *opencode.Config, customCommands []opencode.Command) 
 			Name:        AgentCycleReverseCommand,
 			Description: "previous agent",
 			Keybindings: parseBindings("shift+tab"),
+		},
+		{
+			Name:        McpListCommand,
+			Description: "list mcps",
+			Trigger:     []string{"mcp"},
+		},
+		{
+			Name:        StashListCommand,
+			Description: "list stash",
+			Trigger:     []string{"stash"},
+		},
+		{
+			Name:        FileListCommand,
+			Description: "list files",
+			Trigger:     []string{"tag", "files"},
+		},
+		{
+			Name:        ExportCommand,
+			Description: "export session",
+			Trigger:     []string{"export"},
 		},
 		{
 			Name:        ThemeListCommand,

@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -10,6 +11,19 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
+
+func FormatRelativeTime(t time.Time) string {
+	diff := time.Since(t)
+	if diff < time.Minute {
+		return "just now"
+	} else if diff < time.Hour {
+		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
+	} else if diff < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(diff.Hours()))
+	} else {
+		return t.Format("Jan 02")
+	}
+}
 
 func CmdHandler(msg tea.Msg) tea.Cmd {
 	return func() tea.Msg {

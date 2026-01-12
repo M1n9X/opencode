@@ -35,8 +35,14 @@ type State struct {
 	RecentlyUsedModels []ModelUsage          `toml:"recently_used_models"`
 	RecentlyUsedAgents []AgentUsage          `toml:"recently_used_agents"`
 	MessageHistory     []Prompt              `toml:"message_history"`
+	PromptStash        []StashEntry          `toml:"prompt_stash"`
 	ShowToolDetails    *bool                 `toml:"show_tool_details"`
 	ShowThinkingBlocks *bool                 `toml:"show_thinking_blocks"`
+}
+
+type StashEntry struct {
+	Input     string    `toml:"input"`
+	Timestamp time.Time `toml:"timestamp"`
 }
 
 func NewState() *State {
@@ -47,6 +53,7 @@ func NewState() *State {
 		RecentlyUsedModels: make([]ModelUsage, 0),
 		RecentlyUsedAgents: make([]AgentUsage, 0),
 		MessageHistory:     make([]Prompt, 0),
+		PromptStash:        make([]StashEntry, 0),
 	}
 }
 
@@ -127,6 +134,22 @@ func (s *State) AddPromptToHistory(prompt Prompt) {
 	s.MessageHistory = append([]Prompt{prompt}, s.MessageHistory...)
 	if len(s.MessageHistory) > 50 {
 		s.MessageHistory = s.MessageHistory[:50]
+	}
+}
+
+func (s *State) AddPromptToStash(input string) {
+	entry := StashEntry{
+		Input:     input,
+		Timestamp: time.Now(),
+	}
+	s.PromptStash = append(s.PromptStash, entry)
+}
+
+func (s *State) RemovePromptFromStash(index int) {
+	if index >= 0 && index < len(s.PromptStash) {
+		// Because we often display reversed (newest first), we might need to be careful with index.
+		// For now, assume index matches the slice index.
+		s.PromptStash = append(s.PromptStash[:index], s.PromptStash[index+1:]...)
 	}
 }
 

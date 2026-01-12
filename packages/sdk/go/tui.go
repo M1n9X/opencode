@@ -15,6 +15,11 @@ import (
 	"github.com/sst/opencode-sdk-go/option"
 )
 
+var querySettings = apiquery.QuerySettings{
+	ArrayFormat:  apiquery.ArrayQueryFormatComma,
+	NestedFormat: apiquery.NestedQueryFormatBrackets,
+}
+
 // TuiService contains methods and other services that help with interacting with
 // the opencode API.
 //
@@ -117,10 +122,7 @@ func (r TuiAppendPromptParams) MarshalJSON() (data []byte, err error) {
 
 // URLQuery serializes [TuiAppendPromptParams]'s query parameters as `url.Values`.
 func (r TuiAppendPromptParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiClearPromptParams struct {
@@ -129,10 +131,7 @@ type TuiClearPromptParams struct {
 
 // URLQuery serializes [TuiClearPromptParams]'s query parameters as `url.Values`.
 func (r TuiClearPromptParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiExecuteCommandParams struct {
@@ -147,10 +146,7 @@ func (r TuiExecuteCommandParams) MarshalJSON() (data []byte, err error) {
 // URLQuery serializes [TuiExecuteCommandParams]'s query parameters as
 // `url.Values`.
 func (r TuiExecuteCommandParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiOpenHelpParams struct {
@@ -159,10 +155,7 @@ type TuiOpenHelpParams struct {
 
 // URLQuery serializes [TuiOpenHelpParams]'s query parameters as `url.Values`.
 func (r TuiOpenHelpParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiOpenModelsParams struct {
@@ -171,10 +164,7 @@ type TuiOpenModelsParams struct {
 
 // URLQuery serializes [TuiOpenModelsParams]'s query parameters as `url.Values`.
 func (r TuiOpenModelsParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiOpenSessionsParams struct {
@@ -183,10 +173,7 @@ type TuiOpenSessionsParams struct {
 
 // URLQuery serializes [TuiOpenSessionsParams]'s query parameters as `url.Values`.
 func (r TuiOpenSessionsParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiOpenThemesParams struct {
@@ -195,10 +182,7 @@ type TuiOpenThemesParams struct {
 
 // URLQuery serializes [TuiOpenThemesParams]'s query parameters as `url.Values`.
 func (r TuiOpenThemesParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiShowToastParams struct {
@@ -214,10 +198,7 @@ func (r TuiShowToastParams) MarshalJSON() (data []byte, err error) {
 
 // URLQuery serializes [TuiShowToastParams]'s query parameters as `url.Values`.
 func (r TuiShowToastParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }
 
 type TuiShowToastParamsVariant string
@@ -243,8 +224,5 @@ type TuiSubmitPromptParams struct {
 
 // URLQuery serializes [TuiSubmitPromptParams]'s query parameters as `url.Values`.
 func (r TuiSubmitPromptParams) URLQuery() (v url.Values) {
-	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
-		ArrayFormat:  apiquery.ArrayQueryFormatComma,
-		NestedFormat: apiquery.NestedQueryFormatBrackets,
-	})
+	return apiquery.MarshalWithSettings(r, querySettings)
 }

@@ -257,8 +257,9 @@ func renderText(
 		var result strings.Builder
 		lastEnd := int64(0)
 
-		// Apply highlighting to filenames and base style to rest of text BEFORE wrapping
-		textLen := int64(len(text))
+		// Convert to runes for correct indexing
+		runes := []rune(text)
+		textLen := int64(len(runes))
 
 		// Collect all parts to highlight (both file and agent parts)
 		type highlightPart struct {
@@ -328,17 +329,17 @@ func renderText(
 			}
 
 			if start > lastEnd {
-				result.WriteString(base.Render(text[lastEnd:start]))
+				result.WriteString(base.Render(string(runes[lastEnd:start])))
 			}
 			if start < end {
-				result.WriteString(highlight.Render(text[start:end]))
+				result.WriteString(highlight.Render(string(runes[start:end])))
 			}
 
 			lastEnd = end
 		}
 
 		if lastEnd < textLen {
-			result.WriteString(base.Render(text[lastEnd:]))
+			result.WriteString(base.Render(string(runes[lastEnd:])))
 		}
 
 		// wrap styled text

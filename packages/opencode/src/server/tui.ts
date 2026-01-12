@@ -3,23 +3,24 @@ import { describeRoute, resolver, validator } from "hono-openapi"
 import { z } from "zod"
 import { AsyncQueue } from "../util/queue"
 
-const TuiRequest = z.object({
+const TuiRequestSchema = z.object({
   path: z.string(),
-  body: z.any(),
+  body: z.unknown(),
 })
 
-type TuiRequest = z.infer<typeof TuiRequest>
+type TuiRequest = z.infer<typeof TuiRequestSchema>
+type TuiResponse = unknown
 
-const request = new AsyncQueue<TuiRequest>()
-const response = new AsyncQueue<any>()
+const reqQueue = new AsyncQueue<TuiRequest>()
+const resQueue = new AsyncQueue<TuiResponse>()
 
 export async function callTui(ctx: Context) {
   const body = await ctx.req.json()
-  request.push({
+  reqQueue.push({
     path: ctx.req.path,
     body,
   })
-  return response.next()
+  return resQueue.next()
 }
 
 export const TuiRoute = new Hono()
@@ -34,14 +35,14 @@ export const TuiRoute = new Hono()
           description: "Next TUI request",
           content: {
             "application/json": {
-              schema: resolver(TuiRequest),
+              schema: resolver(TuiRequestSchema),
             },
           },
         },
       },
     }),
     async (c) => {
-      const req = await request.next()
+      const req = await reqQueue.next()
       return c.json(req)
     },
   )
@@ -62,10 +63,10 @@ export const TuiRoute = new Hono()
         },
       },
     }),
-    validator("json", z.any()),
+    validator("json", z.unknown()),
     async (c) => {
       const body = c.req.valid("json")
-      response.push(body)
+      resQueue.push(body)
       return c.json(true)
     },
   )

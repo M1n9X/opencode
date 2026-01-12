@@ -379,7 +379,16 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case app.SetEditorContentMsg:
-		a.chatPage.Editor.SetValueWithAttachments(msg.Text)
+		if msg.Append {
+			existing := a.chatPage.Editor.Value()
+			text := msg.Text
+			if existing != "" && !strings.HasSuffix(existing, " ") {
+				text = " " + text
+			}
+			a.chatPage.Editor.SetValueWithAttachments(existing + text)
+		} else {
+			a.chatPage.Editor.SetValueWithAttachments(msg.Text)
+		}
 		updated, cmd := a.chatPage.Editor.Focus()
 		a.chatPage.Editor = updated.(chat.EditorComponent)
 		cmds = append(cmds, cmd)
@@ -731,6 +740,9 @@ func (a Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/tui/open-models":
 			modelDialog := dialog.NewModelDialog(a.app)
 			a.modal = modelDialog
+		case "/tui/open-mcp":
+			mcpDialog := dialog.NewMcpDialog(a.app)
+			a.modal = mcpDialog
 		case "/tui/append-prompt":
 			var body struct {
 				Text string `json:"text"`
@@ -1083,6 +1095,18 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 	case commands.ThemeListCommand:
 		themeDialog := dialog.NewThemeDialog()
 		a.modal = themeDialog
+	case commands.McpListCommand:
+		mcpDialog := dialog.NewMcpDialog(a.app)
+		a.modal = mcpDialog
+	case commands.StashListCommand:
+		stashDialog := dialog.NewStashDialog(a.app)
+		a.modal = stashDialog
+	case commands.FileListCommand:
+		fileDialog := dialog.NewFileDialog(a.app)
+		a.modal = fileDialog
+	case commands.ExportCommand:
+		exportDialog := dialog.NewExportDialog(a.app)
+		a.modal = exportDialog
 	case commands.ProjectInitCommand:
 		cmds = append(cmds, a.app.InitializeProject(context.Background()))
 	case commands.InputClearCommand:
